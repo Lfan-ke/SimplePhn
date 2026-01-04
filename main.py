@@ -1,5 +1,5 @@
 """
-SMS微服务主程序 - 修复信号处理版本
+SMS微服务主程序 - 完全修复信号处理版本
 """
 import asyncio
 import signal
@@ -31,6 +31,7 @@ class SMSMicroservice:
         self.grpc_server: Optional[grpc.aio.Server] = None
         self._shutdown_event = asyncio.Event()
         self._shutting_down = False
+        self._main_task: Optional[asyncio.Task] = None
 
     async def start(self) -> bool:
         """启动微服务"""
@@ -170,6 +171,19 @@ class SMSMicroservice:
             logger.error(f"❌ 服务启动失败: {e}")
             return False
 
+    async def run(self):
+        """运行服务主循环"""
+        self._main_task = asyncio.current_task()
+        try:
+            await self.grpc_server.wait_for_termination()
+        except asyncio.CancelledError:
+            logger.info("服务任务被取消")
+            raise
+        except Exception as e:
+            logger.error(f"gRPC服务器异常: {e}")
+        finally:
+            self._main_task = None
+
     async def stop(self):
         """停止微服务"""
         if self._shutting_down:
@@ -177,6 +191,14 @@ class SMSMicroservice:
 
         self._shutting_down = True
         logger.info("🛑 停止SMS微服务...")
+
+        # 取消主任务
+        if self._main_task:
+            self._main_task.cancel()
+            try:
+                await self._main_task
+            except asyncio.CancelledError:
+                pass
 
         # 注销Consul服务
         if self.consul_client:
@@ -189,8 +211,8 @@ class SMSMicroservice:
         # 停止gRPC服务器
         if self.grpc_server:
             try:
-                # 设置较短的grace时间
-                await self.grpc_server.stop(grace=2)
+                # 立即停止，不再等待
+                await self.grpc_server.stop(grace=0)
                 logger.info("✅ gRPC服务器已停止")
             except Exception as e:
                 logger.error(f"❌ 停止gRPC服务器失败: {e}")
@@ -205,14 +227,20 @@ class SMSMicroservice:
 
         logger.info("👋 SMS微服务已停止")
 
-    async def wait_for_shutdown(self):
-        """等待关闭信号"""
-        await self._shutdown_event.wait()
-
     def request_shutdown(self):
         """请求关闭服务"""
         if not self._shutdown_event.is_set():
             self._shutdown_event.set()
+            # 立即取消主任务
+            if self._main_task:
+                self._main_task.cancel()
+
+    async def wait_for_shutdown(self):
+        """等待关闭信号"""
+        try:
+            await self._shutdown_event.wait()
+        except asyncio.CancelledError:
+            pass
 
     async def _setup_logging(self, log_config):
         """配置日志"""
@@ -259,7 +287,13 @@ class SMSMicroservice:
         logger.info("="*50 + "\n")
 
 
-async def main():
+async def shutdown_handler(service: SMSMicroservice, signum):
+    """异步信号处理函数"""
+    logger.info(f"📶 收到信号 {signum}，正在关闭...")
+    service.request_shutdown()
+
+
+def main():
     """主函数"""
     import argparse
 
@@ -271,44 +305,60 @@ async def main():
     # 创建微服务实例
     service = SMSMicroservice(args.config)
 
-    # 启动服务
-    started = await service.start()
-    if not started:
-        logger.error("❌ 服务启动失败")
-        sys.exit(1)
+    # 创建事件循环
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     # 设置信号处理
-    def signal_handler(signum, frame):
-        logger.info(f"📶 收到信号 {signum}，正在关闭...")
-        # 直接设置关闭事件，而不是创建新任务
-        service.request_shutdown()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(
+            sig,
+            lambda s=sig: asyncio.create_task(shutdown_handler(service, s))
+        )
 
-    # 使用signal.signal而不是asyncio的信号处理
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    async def main_async():
+        """异步主函数"""
+        # 启动服务
+        started = await service.start()
+        if not started:
+            logger.error("❌ 服务启动失败")
+            sys.exit(1)
+
+        try:
+            # 创建并运行服务任务
+            service_task = asyncio.create_task(service.run())
+
+            # 等待关闭信号
+            await service.wait_for_shutdown()
+
+            # 停止服务
+            await service.stop()
+
+            # 等待服务任务完成
+            await service_task
+        except asyncio.CancelledError:
+            logger.info("主任务被取消")
+        except Exception as e:
+            logger.error(f"主程序异常: {e}")
+        finally:
+            # 清理信号处理器
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
+
+            logger.info("🏁 服务关闭完成")
 
     try:
-        # 等待关闭信号
-        await service.wait_for_shutdown()
-    except KeyboardInterrupt:
-        logger.info("⌨️ 收到键盘中断")
-        service.request_shutdown()
-    except Exception as e:
-        logger.error(f"💥 服务器异常: {e}")
-        service.request_shutdown()
-    finally:
-        # 确保服务被停止
-        await service.stop()
-
-    logger.info("🏁 服务关闭完成")
-
-
-if __name__ == "__main__":
-    # 使用asyncio.run但处理信号正确
-    try:
-        asyncio.run(main())
+        # 运行主循环
+        loop.run_until_complete(main_async())
     except KeyboardInterrupt:
         logger.info("程序被用户中断")
     except Exception as e:
-        logger.error(f"主程序异常: {e}")
+        logger.error(f"程序异常: {e}")
         sys.exit(1)
+    finally:
+        # 关闭事件循环
+        loop.close()
+
+
+if __name__ == "__main__":
+    main()
