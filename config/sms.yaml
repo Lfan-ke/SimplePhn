@@ -17,11 +17,13 @@ serial:
     - "/dev/ttyUSB*"
 
   baudrate: 115200
-  timeout: 3.5
-  write_timeout: 2.0
+  timeout: 10.0
+  pin: null
 
   max_retries: 3
   retry_delay: 1.0
+  connection_timeout: 30.0
+  lock_timeout: 30.0
 
 log:
   mode: "console"

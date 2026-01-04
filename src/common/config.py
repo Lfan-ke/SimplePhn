@@ -1,5 +1,5 @@
 """
-通用配置管理
+公共配置管理模块
 """
 import os
 from pathlib import Path
@@ -17,27 +17,39 @@ class LogMode(str, Enum):
     BOTH = "both"
 
 
-class SerialConfig(BaseModel):
-    """串口配置"""
+class ModemConfig(BaseModel):
+    """调制解调器配置"""
     port_patterns: list[str] = Field(
         default_factory=lambda: [
             "/dev/ttyUSB*",
             "/dev/ttyACM*",
             "/dev/ttyAMA*",
             "/dev/ttyS*",
-            "COM*"  # Windows串口
+            "COM*"
         ]
     )
-    baudrate: int = Field(default=9600, ge=9600, le=115200)
-    timeout: float = Field(default=2.0, ge=0.1, le=10.0)
-    write_timeout: float = Field(default=2.0, ge=0.1, le=10.0)
+    baudrate: int = Field(default=115200, ge=9600, le=115200)
+    timeout: float = Field(default=10.0, ge=1.0, le=60.0)
+    pin: Optional[str] = Field(default=None)
+
+    # 管理配置
     max_retries: int = Field(default=3, ge=1, le=10)
-    retry_delay: float = Field(default=1.0, ge=0.1, le=5.0)
+    retry_delay: float = Field(default=1.0, ge=0.5, le=5.0)
+    connection_timeout: float = Field(default=30.0, ge=5.0, le=120.0)
+    lock_timeout: float = Field(default=30.0, ge=5.0, le=120.0)
+
+    @field_validator('port_patterns')
+    @classmethod
+    def validate_port_patterns(cls, v: list[str]) -> list[str]:
+        """根据操作系统调整端口模式"""
+        if os.name == 'nt':  # Windows
+            return ["COM*"] if not v else v
+        return v
 
 
 class ConsulConfig(BaseModel):
     """Consul配置"""
-    host: str = Field(default="127.0.0.1:8500")
+    host: str = Field(default="localhost:8500")
     token: str = Field(default="")
     scheme: str = Field(default="http")
     health_check_interval: str = Field(default="10s")
@@ -47,9 +59,8 @@ class ConsulConfig(BaseModel):
     @field_validator('host')
     @classmethod
     def validate_host(cls, v: str) -> str:
-        """验证Consul主机地址"""
         if not v:
-            return "127.0.0.1:8500"
+            return "localhost:8500"
         return v
 
 
@@ -70,34 +81,29 @@ class ServerConfig(BaseModel):
     max_workers: int = Field(default=10, ge=1, le=50)
 
 
-class Config(BaseModel):
-    """主配置"""
-    server: ServerConfig = ServerConfig()
-    consul: ConsulConfig = ConsulConfig()
-    serial: SerialConfig = SerialConfig()
-    log: LogConfig = LogConfig()
+class AppConfig(BaseModel):
+    """应用配置"""
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    consul: ConsulConfig = Field(default_factory=ConsulConfig)
+    modem: ModemConfig = Field(default_factory=ModemConfig)
+    log: LogConfig = Field(default_factory=LogConfig)
 
 
 class ConfigManager:
     """
-    配置管理器 - 单例模式
+    配置管理器（单例模式）
     """
     _instance = None
+    _config: Optional[AppConfig] = None
 
     def __new__(cls):
-        """实现单例模式"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._config: Optional[Config] = None
         return cls._instance
 
-    def __init__(self):
-        """初始化配置管理器"""
-        pass
-
-    async def load_config(self, config_path: Path) -> bool:
+    async def load(self, config_path: Path) -> bool:
         """
-        从YAML文件加载配置
+        加载配置文件
 
         Args:
             config_path: 配置文件路径
@@ -113,13 +119,7 @@ class ConfigManager:
             with open(config_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
 
-            # 根据系统平台调整串口配置
-            if os.name == 'nt':  # Windows
-                if 'serial' in data:
-                    if 'port_patterns' not in data['serial']:
-                        data['serial']['port_patterns'] = ["COM*"]
-
-            self._config = Config(**data)
+            self._config = AppConfig(**data)
             logger.info(f"配置加载成功: {config_path}")
             return True
 
@@ -127,33 +127,33 @@ class ConfigManager:
             logger.error(f"加载配置文件失败: {e}")
             return False
 
-    def get_config(self) -> Config:
+    def get(self) -> AppConfig:
         """
-        获取配置
+        获取配置对象
 
         Returns:
             配置对象
         """
         if self._config is None:
-            raise RuntimeError("配置未加载，请先调用load_config()")
+            raise RuntimeError("配置未加载，请先调用load()方法")
         return self._config
 
     @property
-    def server_config(self) -> ServerConfig:
+    def server(self) -> ServerConfig:
         """获取服务器配置"""
-        return self.get_config().server
+        return self.get().server
 
     @property
-    def consul_config(self) -> ConsulConfig:
+    def consul(self) -> ConsulConfig:
         """获取Consul配置"""
-        return self.get_config().consul
+        return self.get().consul
 
     @property
-    def serial_config(self) -> SerialConfig:
-        """获取串口配置"""
-        return self.get_config().serial
+    def modem(self) -> ModemConfig:
+        """获取调制解调器配置"""
+        return self.get().modem
 
     @property
-    def log_config(self) -> LogConfig:
+    def log(self) -> LogConfig:
         """获取日志配置"""
-        return self.get_config().log
+        return self.get().log

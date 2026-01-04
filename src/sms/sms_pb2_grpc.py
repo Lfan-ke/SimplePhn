@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import src.sms_service.sms_pb2 as sms__pb2
+import sms_pb2 as sms__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -50,6 +50,11 @@ class SMSServiceStub(object):
                 request_serializer=sms__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=sms__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
+        self.GetModemStatus = channel.unary_unary(
+                '/sms.SMSService/GetModemStatus',
+                request_serializer=sms__pb2.ModemStatusRequest.SerializeToString,
+                response_deserializer=sms__pb2.ModemStatusResponse.FromString,
+                _registered_method=True)
 
 
 class SMSServiceServicer(object):
@@ -77,6 +82,13 @@ class SMSServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetModemStatus(self, request, context):
+        """获取调制解调器状态
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SMSServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -94,6 +106,11 @@ def add_SMSServiceServicer_to_server(servicer, server):
                     servicer.HealthCheck,
                     request_deserializer=sms__pb2.HealthCheckRequest.FromString,
                     response_serializer=sms__pb2.HealthCheckResponse.SerializeToString,
+            ),
+            'GetModemStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetModemStatus,
+                    request_deserializer=sms__pb2.ModemStatusRequest.FromString,
+                    response_serializer=sms__pb2.ModemStatusResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -178,6 +195,33 @@ class SMSService(object):
             '/sms.SMSService/HealthCheck',
             sms__pb2.HealthCheckRequest.SerializeToString,
             sms__pb2.HealthCheckResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetModemStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sms.SMSService/GetModemStatus',
+            sms__pb2.ModemStatusRequest.SerializeToString,
+            sms__pb2.ModemStatusResponse.FromString,
             options,
             channel_credentials,
             insecure,

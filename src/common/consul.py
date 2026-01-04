@@ -1,14 +1,13 @@
 """
-Consul客户端
+Consul客户端模块
 """
-import asyncio
 import json
 import time
 import socket
 import os
-from typing import Optional
-from dataclasses import dataclass, asdict, field
-import consul
+from typing import Optional, Dict, Any
+from dataclasses import dataclass, field, asdict
+import consul as consul_lib
 from loguru import logger
 
 
@@ -32,7 +31,7 @@ class ConsulClient:
         host: str,
         token: str = "",
         scheme: str = "http",
-        kv_base_path: str = "echo_wing/"
+        kv_base_path: str = "simplephn/"
     ):
         # 解析主机和端口
         if ":" in host:
@@ -43,7 +42,7 @@ class ConsulClient:
             port = 8500
 
         # 创建Consul客户端
-        self.client = consul.Consul(
+        self.client = consul_lib.Consul(
             host=host_str,
             port=port,
             token=token if token else None,
@@ -56,7 +55,6 @@ class ConsulClient:
         self.service_name: Optional[str] = None
         self.kv_path: Optional[str] = None
         self.registered: bool = False
-        self.kv_registered: bool = False
 
     async def register_service(
         self,
@@ -64,10 +62,23 @@ class ConsulClient:
         address: str,
         port: int,
         service_desc: str = "",
-        server_data: Optional[dict] = None,
-        meta: Optional[dict] = None
+        server_data: Optional[Dict[str, Any]] = None,
+        meta: Optional[Dict[str, str]] = None
     ) -> bool:
-        """注册服务到Consul"""
+        """
+        注册服务到Consul
+
+        Args:
+            service_name: 服务名称
+            address: 服务地址
+            port: 服务端口
+            service_desc: 服务描述
+            server_data: 服务数据
+            meta: 元数据
+
+        Returns:
+            是否注册成功
+        """
         if self.registered:
             return True
 
@@ -81,7 +92,7 @@ class ConsulClient:
         self.service_id = f"{service_name}-{hostname}-{pid}-{port}-{timestamp}"
 
         # 准备注册数据
-        tags = ["sms", "notification", "grpc"]
+        tags = ["sms", "notification", "grpc", "gsmmodem"]
 
         if meta is None:
             meta = {
@@ -95,7 +106,7 @@ class ConsulClient:
             meta["kv_path"] = self.kv_path
 
         try:
-            # 使用TCP检查而不是TTL检查，这样更简单
+            # 使用TCP检查
             check = {
                 "TCP": f"{address}:{port}",
                 "Interval": "10s",
@@ -103,7 +114,7 @@ class ConsulClient:
                 "DeregisterCriticalServiceAfter": "30s"
             }
 
-            # 注册服务，包含TCP检查
+            # 注册服务
             self.client.agent.service.register(
                 name=service_name,
                 service_id=self.service_id,
@@ -116,7 +127,6 @@ class ConsulClient:
 
             self.registered = True
             logger.info(f"服务 {service_name} 注册成功 (ID: {self.service_id})")
-            logger.info(f"检查类型: TCP, 检查地址: {address}:{port}")
 
             # 注册KV
             await self._register_kv(service_desc, server_data)
@@ -126,12 +136,9 @@ class ConsulClient:
             logger.error(f"服务注册失败: {e}")
             return False
 
-    async def _register_kv(self, service_desc: str, server_data: Optional[dict]):
+    async def _register_kv(self, service_desc: str, server_data: Optional[Dict[str, Any]]):
         """注册KV"""
         try:
-            # 检查KV是否已存在
-            index, data = self.client.kv.get(self.kv_path)
-
             # 准备KV元数据
             kv_meta = KVServiceMeta(
                 ServerName=self.service_name,
@@ -143,14 +150,18 @@ class ConsulClient:
             data_str = json.dumps(asdict(kv_meta), ensure_ascii=False)
             self.client.kv.put(self.kv_path, data_str)
 
-            self.kv_registered = True
             logger.info(f"KV {self.kv_path} 注册成功")
 
         except Exception as e:
             logger.warning(f"KV注册失败: {e}")
 
     async def deregister_service(self) -> bool:
-        """从Consul注销服务"""
+        """
+        从Consul注销服务
+
+        Returns:
+            是否注销成功
+        """
         if not self.registered or not self.service_id:
             return True
 
@@ -171,7 +182,7 @@ class ConsulClient:
 
     async def _delete_kv_if_no_instances(self):
         """如果没有活跃实例，删除KV"""
-        if not self.kv_registered or not self.service_name:
+        if not self.service_name:
             return
 
         try:
@@ -188,7 +199,6 @@ class ConsulClient:
 
             if not active_services:
                 self.client.kv.delete(self.kv_path)
-                self.kv_registered = False
                 logger.info(f"KV {self.kv_path} 已删除（无活跃实例）")
 
         except Exception as e:

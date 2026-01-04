@@ -12,11 +12,14 @@ service SMSService {
 
   // 健康检查
   rpc HealthCheck(HealthCheckRequest) returns(HealthCheckResponse) {}
+
+  // 获取调制解调器状态
+  rpc GetModemStatus(ModemStatusRequest) returns(ModemStatusResponse) {}
 }
 
 // 发送短信请求
 message SendSMSRequest {
-  string phone_number = 1;           // 手机号码
+  string phone_number = 1;           // 手机号码（国际格式）
   string content = 2;                // 短信内容
   string sender_id = 3;              // 发送者ID（可选）
   bool delivery_report = 4;          // 是否要求送达报告
@@ -44,6 +47,16 @@ message SendBatchSMSResponse {
   int32 status = 1;    // 状态码 (200=成功)
   string message = 2;  // 状态信息
   string data = 3;     // JSON格式附加数据
+}
+
+// 调制解调器状态请求
+message ModemStatusRequest {}
+
+// 调制解调器状态响应
+message ModemStatusResponse {
+  int32 status = 1;
+  string message = 2;
+  string data = 3;  // JSON格式的调制解调器状态
 }
 
 // 健康检查请求
