@@ -1,10 +1,6 @@
-"""
-调制解调器管理器 - 修复版本
-"""
 import asyncio
 import time
-import random
-import re
+import glob
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,12 +13,11 @@ from gsmmodem.exceptions import (
     TimeoutException, GsmModemException
 )
 
-from .config import Config
+from .config import AppConfig
 
 
 @dataclass
 class ModemInfo:
-    """调制解调器信息"""
     port: str
     manufacturer: str = "Unknown"
     model: str = "Unknown"
@@ -42,12 +37,6 @@ class ModemInfo:
 
 
 class ManagedModem:
-    """
-    托管调制解调器
-
-    封装 GsmModem 实例，提供连接池、错误处理和监控功能
-    """
-
     def __init__(self, modem: GsmModem, info: ModemInfo):
         self.modem = modem
         self.info = info
@@ -55,16 +44,6 @@ class ManagedModem:
         self._last_health_check = time.time()
 
     async def send_sms(self, phone_number: str, message: str) -> Tuple[bool, str]:
-        """
-        发送短信
-
-        Args:
-            phone_number: 手机号码
-            message: 短信内容
-
-        Returns:
-            (成功状态, 消息/错误)
-        """
         try:
             async with self._lock:
                 self.info.in_use = True
@@ -74,15 +53,13 @@ class ManagedModem:
                 logger.debug(f"📄 内容长度: {len(message)} 字符")
                 logger.debug(f"📱 调制解调器编码: {self.info.sms_encoding}")
 
-                # 发送短信 - 注意：移除 unicode 参数！
                 try:
-                    # 基本调用，让 gsmmodem 自动处理编码
                     self.modem.sendSms(
                         destination=phone_number,
                         text=message,
                         waitForDeliveryReport=False,
                         deliveryTimeout=30,
-                        sendFlash=False  # 不是闪信
+                        sendFlash=False
                     )
 
                     logger.info(f"✅ 短信发送成功: {phone_number} via {self.info.port}")
@@ -96,10 +73,8 @@ class ManagedModem:
                     logger.error(f"❌ 发送失败: {error_msg}")
                     self.info.error_count += 1
 
-                    # 如果是编码错误，尝试不同的处理方式
                     if "encoding" in str(e).lower() or "character" in str(e).lower():
                         logger.warning(f"⚠️ 可能编码问题，尝试特殊处理...")
-                        # 这里可以添加编码特殊处理逻辑
 
                     return False, error_msg
 
@@ -123,14 +98,11 @@ class ManagedModem:
             self.info.in_use = False
 
     async def health_check(self) -> bool:
-        """健康检查"""
         try:
             async with self._lock:
-                # 检查信号强度
                 signal = self.modem.signalStrength
                 self.info.signal_strength = signal
 
-                # 检查网络连接
                 network = self.modem.networkName
                 if network:
                     self.info.network_name = network
@@ -152,7 +124,6 @@ class ManagedModem:
             return False
 
     async def close(self):
-        """关闭调制解调器连接"""
         try:
             if self.modem:
                 self.modem.close()
@@ -162,27 +133,19 @@ class ManagedModem:
 
 
 class ModemManager:
-    """
-    调制解调器管理器
-
-    管理多个调制解调器，提供负载均衡、故障转移和连接池功能
-    """
-
-    def __init__(self, config: Config):
+    def __init__(self, config: AppConfig):
         self.config = config
         self.modems: Dict[str, ManagedModem] = {}
         self._initialized = False
         self._lock = asyncio.Lock()
         self._last_status_check = 0
         self._status_cache = None
-        self._status_cache_ttl = 5  # 秒
+        self._status_cache_ttl = 5
 
     async def initialize(self) -> bool:
-        """初始化调制解调器管理器"""
         try:
             logger.info("🚀 初始化调制解调器管理器...")
 
-            # 1. 获取调制解调器端口列表
             modem_ports = await self._discover_modem_ports()
             if not modem_ports:
                 logger.warning("⚠️ 未找到调制解调器端口")
@@ -190,7 +153,6 @@ class ModemManager:
 
             logger.info(f"🔍 发现 {len(modem_ports)} 个调制解调器端口: {modem_ports}")
 
-            # 2. 连接和初始化每个调制解调器
             tasks = []
             for port in modem_ports:
                 task = asyncio.create_task(self._initialize_modem(port))
@@ -198,7 +160,6 @@ class ModemManager:
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 3. 统计成功初始化的调制解调器
             successful_modems = 0
             for i, result in enumerate(results):
                 port = modem_ports[i]
@@ -211,8 +172,6 @@ class ModemManager:
 
             if self._initialized:
                 logger.info(f"✅ 调制解调器管理器初始化完成: {successful_modems}/{len(modem_ports)} 个调制解调器可用")
-
-                # 4. 打印调制解调器详情
                 await self._log_modem_details()
             else:
                 logger.error("❌ 调制解调器管理器初始化失败: 没有可用的调制解调器")
@@ -226,53 +185,35 @@ class ModemManager:
             return False
 
     async def _discover_modem_ports(self) -> List[str]:
-        """发现可用的调制解调器端口"""
-        # 从配置中获取端口列表
-        config_ports = self.config.modem.ports
+        modem_config = self.config.modem
 
-        if config_ports:
-            # 过滤存在的端口
-            existing_ports = []
-            for port in config_ports:
-                port_path = Path(port)
-                if port_path.exists():
-                    existing_ports.append(port)
-                else:
-                    logger.warning(f"⚠️ 配置的端口不存在: {port}")
-            return existing_ports
+        discovered_ports = []
+        for pattern in modem_config.port_patterns:
+            matched_ports = glob.glob(pattern)
+            discovered_ports.extend(matched_ports)
 
-        # 如果没有配置端口，尝试自动发现
-        logger.info("🔍 自动发现调制解调器端口...")
+        discovered_ports = sorted(set(discovered_ports))
 
-        # 常见的调制解调器端口
-        common_ports = [
-            "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB2", "/dev/ttyUSB3",
-            "/dev/ttyACM0", "/dev/ttyACM1",
-            "/dev/ttyS0", "/dev/ttyS1", "/dev/ttyS2", "/dev/ttyS3",
-            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6"
-        ]
-
-        # 检查哪些端口存在
-        available_ports = []
-        for port in common_ports:
+        existing_ports = []
+        for port in discovered_ports:
             port_path = Path(port)
             if port_path.exists():
-                available_ports.append(port)
+                existing_ports.append(port)
                 logger.debug(f"  发现端口: {port}")
+            else:
+                logger.warning(f"⚠️ 端口不存在: {port}")
 
-        if available_ports:
-            logger.info(f"✅ 自动发现 {len(available_ports)} 个端口")
+        if existing_ports:
+            logger.info(f"✅ 发现 {len(existing_ports)} 个调制解调器端口")
+            return existing_ports
         else:
             logger.warning("⚠️ 未发现任何调制解调器端口")
-
-        return available_ports
+            return []
 
     async def _initialize_modem(self, port: str) -> bool:
-        """初始化单个调制解调器"""
         try:
             logger.info(f"🔄 初始化调制解调器: {port}")
 
-            # 1. 创建 GsmModem 实例
             modem = GsmModem(
                 port=port,
                 baudrate=self.config.modem.baudrate,
@@ -283,11 +224,9 @@ class ModemManager:
                 AT_CNMI=''
             )
 
-            # 2. 连接到调制解调器
             logger.debug(f"  连接调制解调器: {port}")
             modem.connect(pin=self.config.modem.pin)
 
-            # 3. 收集调制解调器信息
             info = ModemInfo(
                 port=port,
                 manufacturer=modem.manufacturer,
@@ -307,10 +246,8 @@ class ModemManager:
                 retry_delay=self.config.modem.retry_delay
             )
 
-            # 4. 创建托管调制解调器
             managed_modem = ManagedModem(modem, info)
 
-            # 5. 添加到管理器
             self.modems[port] = managed_modem
 
             logger.info(f"✅ 调制解调器初始化成功: {port}")
@@ -338,32 +275,18 @@ class ModemManager:
             return False
 
     async def send_sms(self, phone_number: str, message: str) -> Tuple[bool, str, str]:
-        """
-        发送短信（带负载均衡）
-
-        Args:
-            phone_number: 手机号码
-            message: 短信内容
-
-        Returns:
-            (成功状态, 消息/错误, 使用的调制解调器端口)
-        """
         if not self._initialized:
             return False, "调制解调器管理器未初始化", ""
 
-        # 1. 选择最优的调制解调器
         selected_modem = await self._select_modem_for_sending()
         if not selected_modem:
             return False, "没有可用的调制解调器", ""
 
-        # 2. 发送短信
         success, message_result = await selected_modem.send_sms(phone_number, message)
 
         return success, message_result, selected_modem.info.port
 
     async def _select_modem_for_sending(self) -> Optional[ManagedModem]:
-        """选择用于发送短信的调制解调器（负载均衡）"""
-        # 获取可用的调制解调器
         available_modems = []
         for modem in self.modems.values():
             if modem.info.is_available and not modem.info.in_use:
@@ -373,21 +296,13 @@ class ModemManager:
             logger.warning("⚠️ 没有可用的调制解调器")
             return None
 
-        # 选择策略：基于信号强度和最近使用时间
         def modem_score(modem: ManagedModem) -> float:
-            # 基础分数：信号强度（0-99）
             signal_score = modem.info.signal_strength / 99.0 if modem.info.signal_strength > 0 else 0
-
-            # 错误惩罚：错误越多，分数越低
             error_penalty = modem.info.error_count * 0.1
-
-            # 最近使用惩罚：鼓励使用最近未使用的调制解调器
             time_since_last_use = time.time() - modem.info.last_used
-            freshness_bonus = min(time_since_last_use / 3600.0, 1.0)  # 最大1小时
-
+            freshness_bonus = min(time_since_last_use / 3600.0, 1.0)
             return signal_score + freshness_bonus - error_penalty
 
-        # 选择分数最高的调制解调器
         selected_modem = max(available_modems, key=modem_score)
 
         logger.debug(f"📱 选择调制解调器: {selected_modem.info.port}, "
@@ -397,7 +312,6 @@ class ModemManager:
         return selected_modem
 
     async def health_check(self) -> bool:
-        """健康检查所有调制解调器"""
         if not self.modems:
             logger.warning("⚠️ 没有调制解调器可检查")
             return False
@@ -408,7 +322,6 @@ class ModemManager:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # 统计健康的调制解调器
         healthy_count = 0
         for i, result in enumerate(list(self.modems.values())):
             if isinstance(result, Exception):
@@ -423,17 +336,13 @@ class ModemManager:
         return is_healthy
 
     async def get_status(self) -> Dict[str, Any]:
-        """获取调制解调器状态"""
-        # 使用缓存（如果可用）
         current_time = time.time()
         if (self._status_cache and
             current_time - self._last_status_check < self._status_cache_ttl):
             return self._status_cache
 
-        # 执行健康检查
         await self.health_check()
 
-        # 构建状态信息
         status = {
             "initialized": self._initialized,
             "total_modems": len(self.modems),
@@ -466,14 +375,12 @@ class ModemManager:
             if modem.info.in_use:
                 status["in_use_modems"] += 1
 
-        # 更新缓存
         self._status_cache = status
         self._last_status_check = current_time
 
         return status
 
     async def _log_modem_details(self):
-        """记录调制解调器详情"""
         logger.info("=" * 50)
         logger.info("📱 调制解调器详情:")
 
@@ -496,7 +403,6 @@ class ModemManager:
         logger.info("=" * 50)
 
     async def cleanup(self):
-        """清理资源"""
         logger.info("🧹 清理调制解调器管理器...")
 
         tasks = []
