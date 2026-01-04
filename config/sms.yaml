@@ -1,0 +1,31 @@
+server:
+  name: "sms.rpc"
+  listen_on: "0.0.0.0:50052"
+  mode: "dev"
+  max_workers: 10
+
+consul:
+  host: "dc-a588.local:8500"
+  token: ""
+  scheme: "http"
+  health_check_interval: "10s"
+  health_check_timeout: "5s"
+  deregister_after: "30s"
+
+serial:
+  port_patterns:
+    - "/dev/ttyUSB*"
+
+  baudrate: 115200
+  timeout: 2.0
+  write_timeout: 2.0
+
+  max_retries: 3
+  retry_delay: 1.0
+
+log:
+  mode: "console"
+  level: "info"
+  encoding: "plain"
+  stat: false
+  file_path: "logs/sms_service.log"

@@ -1,0 +1,25 @@
+[project]
+name = "simplephn"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "grpcio>=1.76.0",
+    "grpcio-tools>=1.76.0",
+    "loguru>=0.7.3",
+    "py-consul>=1.7.1",
+    "pydantic>=2.12.5",
+    "pyserial>=3.5",
+    "pyyaml>=6.0.3",
+    "tenacity>=9.1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.24.0",
+    "black>=25.1.0",
+    "mypy>=1.13.0",
+    "ruff>=0.9.4",
+]

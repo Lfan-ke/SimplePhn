@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package sms;
+
+// 短信服务
+service SMSService {
+  // 发送单条短信
+  rpc SendSMS(SendSMSRequest) returns(SendSMSResponse) {}
+
+  // 批量发送短信
+  rpc SendBatchSMS(SendBatchSMSRequest) returns(SendBatchSMSResponse) {}
+
+  // 健康检查
+  rpc HealthCheck(HealthCheckRequest) returns(HealthCheckResponse) {}
+}
+
+// 发送短信请求
+message SendSMSRequest {
+  string phone_number = 1;           // 手机号码
+  string content = 2;                // 短信内容
+  string sender_id = 3;              // 发送者ID（可选）
+  bool delivery_report = 4;          // 是否要求送达报告
+  map<string, string> metadata = 5;  // 元数据
+}
+
+// 批量发送请求
+message SendBatchSMSRequest {
+  repeated string phone_numbers = 1;  // 手机号码列表
+  string content = 2;                 // 短信内容
+  string sender_id = 3;               // 发送者ID（可选）
+  bool delivery_report = 4;           // 是否要求送达报告
+  map<string, string> metadata = 5;   // 元数据
+}
+
+// 发送短信响应
+message SendSMSResponse {
+  int32 status = 1;    // 状态码 (200=成功)
+  string message = 2;  // 状态信息
+  string data = 3;     // JSON格式附加数据
+}
+
+// 批量发送响应
+message SendBatchSMSResponse {
+  int32 status = 1;    // 状态码 (200=成功)
+  string message = 2;  // 状态信息
+  string data = 3;     // JSON格式附加数据
+}
+
+// 健康检查请求
+message HealthCheckRequest {}
+
+// 健康检查响应
+message HealthCheckResponse {
+  int32 status = 1;    // 状态码 (200=成功)
+  string message = 2;  // 状态信息
+  string data = 3;     // JSON格式附加数据
+}
