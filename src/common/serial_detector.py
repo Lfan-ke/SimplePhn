@@ -1,5 +1,5 @@
 """
-通用串口检测器
+通用串口检测器 - 更新版
 """
 import asyncio
 import glob
@@ -8,11 +8,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-import serial
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .config import ConfigManager
+from src.sms_service.sms_sender import SMSSender
 
 
 @dataclass
@@ -53,12 +53,10 @@ class SerialDetector:
             serial_config = self.config_manager.serial_config
             port_patterns = serial_config.port_patterns
             baudrate = serial_config.baudrate
-            timeout = serial_config.timeout
         except RuntimeError:
             logger.warning("配置未加载，使用默认配置")
             port_patterns = ["/dev/ttyUSB*", "/dev/ttyACM*", "COM*"] if os.name == 'nt' else ["/dev/ttyUSB*", "/dev/ttyACM*"]
-            baudrate = 9600
-            timeout = 2.0
+            baudrate = 115200
 
         # 展开所有glob模式
         all_ports = []
@@ -79,7 +77,7 @@ class SerialDetector:
         logger.debug(f"找到串口: {all_ports}")
 
         # 并发检测所有端口
-        tasks = [self._test_port(port, baudrate, timeout) for port in all_ports]
+        tasks = [self._test_port(port, baudrate) for port in all_ports]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # 收集有效的调制解调器
@@ -89,7 +87,7 @@ class SerialDetector:
 
         logger.info(f"检测到 {len(self.detected_modems)} 个调制解调器")
         for modem in self.detected_modems:
-            logger.info(f"  - {modem.port}: {modem.manufacturer} {modem.model} (IMEI: {modem.imei})")
+            logger.info(f"  - {modem.port}: {modem.manufacturer} {modem.model} (信号: {modem.signal_strength})")
 
         return self.detected_modems
 
@@ -97,110 +95,47 @@ class SerialDetector:
         stop=stop_after_attempt(2),
         wait=wait_exponential(multiplier=1, min=0.5, max=2)
     )
-    async def _test_port(self, port: str, baudrate: int, timeout: float) -> Optional[ModemInfo]:
+    async def _test_port(self, port: str, baudrate: int) -> Optional[ModemInfo]:
         """测试指定端口是否连接了GSM调制解调器"""
         try:
             # 检查端口是否存在
             if not Path(port).exists():
                 return None
 
-            # 尝试打开串口
-            ser = serial.Serial(
-                port=port,
-                baudrate=baudrate,
-                timeout=timeout,
-                write_timeout=timeout
-            )
+            # 创建SMSSender实例
+            sender = SMSSender(port=port, baudrate=baudrate)
 
-            await asyncio.sleep(0.5)
+            # 尝试连接
+            connected = await sender.connect()
 
-            # 发送AT命令测试连接
-            ser.write(b'AT\r\n')
-            await asyncio.sleep(0.2)
-            response = ser.read_all().decode('utf-8', errors='ignore')
-
-            if 'OK' not in response:
-                ser.close()
+            if not connected:
+                sender.disconnect()
                 return None
 
-            # 创建调制解调器信息
-            modem_info = ModemInfo(port=port, is_connected=True)
-
             # 获取调制解调器信息
-            modem_info = await self._get_modem_info(ser, modem_info)
+            info_dict = await sender.get_modem_info()
 
-            ser.close()
+            # 创建ModemInfo对象
+            modem_info = ModemInfo(
+                port=port,
+                manufacturer=info_dict.get("manufacturer", "Unknown"),
+                model=info_dict.get("model", "Unknown"),
+                imei=info_dict.get("imei", ""),
+                signal_strength=info_dict.get("signal_strength", "0"),
+                is_connected=info_dict.get("is_connected", False)
+            )
 
-            if modem_info.imei:
+            # 断开连接
+            await sender.disconnect()
+
+            if modem_info.is_connected:
                 return modem_info
 
             return None
 
-        except (serial.SerialException, OSError) as e:
-            logger.debug(f"端口 {port} 不可用: {e}")
-            return None
         except Exception as e:
-            logger.error(f"检测端口 {port} 时发生错误: {e}")
+            logger.debug(f"检测端口 {port} 失败: {e}")
             return None
-
-    async def _get_modem_info(self, ser: serial.Serial, modem_info: ModemInfo) -> ModemInfo:
-        """获取调制解调器详细信息"""
-        try:
-            # 获取制造商信息
-            ser.write(b'ATI\r\n')
-            await asyncio.sleep(0.2)
-            response = ser.read_all().decode('utf-8', errors='ignore')
-
-            # 简单的制造商识别
-            response_upper = response.upper()
-            if 'HUAWEI' in response_upper:
-                modem_info.manufacturer = 'Huawei'
-            elif 'ZTE' in response_upper:
-                modem_info.manufacturer = 'ZTE'
-            elif 'QUECTEL' in response_upper:
-                modem_info.manufacturer = 'Quectel'
-            elif 'SIERRA' in response_upper:
-                modem_info.manufacturer = 'Sierra'
-            elif 'SIMCOM' in response_upper:
-                modem_info.manufacturer = 'SIMCom'
-
-            # 获取型号
-            ser.write(b'AT+GMM\r\n')
-            await asyncio.sleep(0.2)
-            response = ser.read_all().decode('utf-8', errors='ignore')
-            if response:
-                lines = response.strip().split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.startswith('AT') and 'OK' not in line:
-                        modem_info.model = line
-                        break
-
-            # 获取IMEI
-            ser.write(b'AT+GSN\r\n')
-            await asyncio.sleep(0.2)
-            response = ser.read_all().decode('utf-8', errors='ignore')
-            if response:
-                lines = response.strip().split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line.isdigit() and 15 <= len(line) <= 17:
-                        modem_info.imei = line
-                        break
-
-            # 获取信号强度
-            ser.write(b'AT+CSQ\r\n')
-            await asyncio.sleep(0.2)
-            response = ser.read_all().decode('utf-8', errors='ignore')
-            if '+CSQ:' in response:
-                match = re.search(r'\+CSQ:\s*(\d+)', response)
-                if match:
-                    modem_info.signal_strength = match.group(1)
-
-        except Exception as e:
-            logger.warning(f"获取调制解调器信息失败: {e}")
-
-        return modem_info
 
     def get_best_modem(self) -> Optional[ModemInfo]:
         """获取最佳的调制解调器（信号最强）"""

@@ -302,7 +302,7 @@ class SMSMicroservice:
 
     async def _print_config(self, cfg):
         """打印配置信息"""
-        logger.info("\n" + "="*50)
+        logger.info("="*50)
         logger.info("📋 服务配置:")
         logger.info(f"   服务名称: {cfg.server.name}")
         logger.info(f"   监听地址: {cfg.server.listen_on}")
