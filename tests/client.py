@@ -243,6 +243,8 @@ async def main():
         logger.info("2. 发送单条短信")
         logger.info("="*50)
         content = f"测试短信 {time.strftime('%Y-%m-%d %H:%M:%S')} - 这是一条来自Python SMS微服务的测试短信。"
+        content+= f"\n" + "-"*15 + "\n"
+        content+= f"Test SMS {time.strftime('%Y-%m-%d %H:%M:%S')} - This is a test from Python SMS service."
         await client.send_sms(args.phone, content)
         await asyncio.sleep(2)
 
