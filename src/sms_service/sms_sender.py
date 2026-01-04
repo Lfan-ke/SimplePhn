@@ -130,10 +130,10 @@ class SMSSender:
                     status_message="设置文本模式失败"
                 )
 
-            # 设置UCS2编码
-            response = await self._send_at_command('AT+CSCS="UCS2"', wait_time=1.0)
+            # 尝试设置字符集为 GSM（大多数调制解调器默认为 GSM），不强制 UCS2
+            response = await self._send_at_command('AT+CSCS="GSM"', wait_time=1.0)
             if "OK" not in response:
-                logger.warning("设置UCS2编码失败，尝试默认编码...")
+                logger.debug("未能设置 CSCS 为 GSM，使用调制解调器默认字符集")
 
             # 准备电话号码（去掉+号）
             formatted_number = phone_number
@@ -144,8 +144,9 @@ class SMSSender:
             cmd = f'AT+CMGS="{formatted_number}"'
 
             # 尝试多次发送命令，确保收到提示符
+            # 等待 '>' 提示符，最多尝试 3 次
             for attempt in range(3):
-                response = await self._send_at_command(cmd, wait_time=2.0)
+                response = await self._send_at_command(cmd, wait_time=5.0, expect='>')
 
                 if ">" in response:
                     logger.info("✅ 收到发送提示符 >")
@@ -178,14 +179,26 @@ class SMSSender:
                     status_message=f"发送内容失败: {e}"
                 )
 
-            # 等待响应（长短信需要更多时间）
-            wait_time = min(20, 5 + len(content) // 20)  # 根据内容长度动态调整等待时间
+            # 等待并读取响应（长短信需要更多时间），循环读取直到出现终结标志或超时
+            wait_time = min(30, 5 + len(content) // 20)  # 根据内容长度动态调整等待时间
             logger.info(f"⏳ 等待响应 ({wait_time}秒)...")
-            await asyncio.sleep(wait_time)
+            deadline = time.time() + wait_time
+            buffer = b""
+            response = ""
+            while time.time() < deadline:
+                await asyncio.sleep(0.2)
+                chunk = self.serial.read_all()
+                if chunk:
+                    buffer += chunk
+                    try:
+                        response = buffer.decode('utf-8', errors='ignore')
+                    except Exception:
+                        response = buffer.decode('latin1', errors='ignore')
 
-            # 读取响应
-            response = self.serial.read_all().decode('utf-8', errors='ignore')
-            logger.debug(f"响应内容: {response[:200]}")
+                    logger.debug(f"响应片段: {response[:200]}")
+
+                    if any(k in response for k in ("+CMGS:", "OK", "ERROR", "+CMS ERROR:")):
+                        break
 
             # 检查响应
             if '+CMGS:' in response:
@@ -249,31 +262,47 @@ class SMSSender:
                 status_message=f"发送异常: {str(e)}"
             )
 
-    async def _send_at_command(self, command: str, wait_time: float = 1.0) -> str:
+    async def _send_at_command(self, command: str, wait_time: float = 1.0, expect: Optional[str] = None) -> str:
         """发送AT命令"""
         if not self.serial:
             raise RuntimeError("串口未连接")
 
         try:
-            # 清空输入缓冲区
+            # 清空输入缓冲区并发送命令
             self.serial.reset_input_buffer()
-
-            # 发送命令
             if self._debug_mode:
                 logger.debug(f"发送AT命令: {command}")
             self.serial.write(f"{command}\r\n".encode())
 
-            # 等待响应
-            await asyncio.sleep(wait_time)
+            # 主动轮询读取，直到超时或收到期望内容（如 '>', 'OK', 'ERROR' 等）
+            deadline = time.time() + wait_time
+            buffer = b""
+            while time.time() < deadline:
+                await asyncio.sleep(0.1)
+                chunk = self.serial.read_all()
+                if chunk:
+                    buffer += chunk
+                    try:
+                        text = buffer.decode('utf-8', errors='ignore')
+                    except Exception:
+                        text = buffer.decode('latin1', errors='ignore')
 
-            # 读取响应
-            response_bytes = self.serial.read_all()
-            response = response_bytes.decode('utf-8', errors='ignore').strip()
+                    if self._debug_mode and text:
+                        logger.debug(f"AT部分响应: {text[:200]}")
 
-            if self._debug_mode and response:
-                logger.debug(f"AT响应: {response}")
+                    # 如果 caller 指定了期望字符串，则优先匹配
+                    if expect and expect in text:
+                        return text.strip()
 
-            return response
+                    # 否则检测常见终结标志
+                    if any(k in text for k in ("OK", "ERROR", ">", "+CMGS:", "+CMS ERROR:")):
+                        return text.strip()
+
+            # 超时，返回已读取的数据（可能为空）
+            try:
+                return buffer.decode('utf-8', errors='ignore').strip()
+            except Exception:
+                return buffer.decode('latin1', errors='ignore').strip()
 
         except Exception as e:
             logger.error(f"发送AT命令失败: {command} - {e}")
