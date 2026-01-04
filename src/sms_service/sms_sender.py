@@ -1,5 +1,5 @@
 """
-SMS短信发送器 - 完整修复版，支持长短信自动分割与UDH编码
+SMS短信发送器 - 修复版，支持在文本模式下发送长短信（带UDH头，全部使用UCS2编码）
 """
 import asyncio
 import time
@@ -34,12 +34,13 @@ def to_ucs2_hex(s: str) -> str:
         return s.encode("utf-16-be").hex().upper()
     except Exception as e:
         logger.error(f"编码字符串到UCS2失败: {e}")
+        # 尝试用替代字符替换非法字符
         s_clean = s.encode('utf-8', 'replace').decode('utf-8')
         return s_clean.encode("utf-16-be").hex().upper()
 
 
 class SMSSender:
-    """短信发送器 - 支持长短信自动分割与UDH编码"""
+    """短信发送器 - 支持在文本模式下发送长短信（带UDH头，全部使用UCS2编码）"""
 
     def __init__(self, port: str, baudrate: int = 115200, timeout: float = 5.0):
         self.port = port
@@ -79,15 +80,27 @@ class SMSSender:
 
             await self._send_at_command("ATE0")
             await self._send_at_command("AT+CMEE=2")
-            await self._send_at_command("AT+CMGF=1")
 
+            # 检查调制解调器能力
+            response = await self._send_at_command("AT+CMGF=?")
+            logger.info(f"支持的短信模式: {response}")
+
+            # 始终使用文本模式
+            response = await self._send_at_command("AT+CMGF=1")
+            if "OK" not in response:
+                logger.error(f"设置文本模式失败，响应: {response}")
+                return False
+
+            # 设置UCS2编码
             response = await self._send_at_command('AT+CSCS="UCS2"')
             if "OK" not in response:
                 logger.error(f"设置UCS2编码失败，响应: {response}")
                 return False
 
+            # 设置短信存储
             await self._send_at_command('AT+CPMS="SM","SM","SM"')
 
+            # 获取调制解调器信息
             info = await self.get_modem_info()
             logger.info(f"调制解调器信息: {info.get('manufacturer', 'Unknown')} {info.get('model', 'Unknown')}")
 
@@ -102,75 +115,98 @@ class SMSSender:
             logger.error(f"❌ 连接调制解调器失败: {e}")
             return False
 
-    def _encode_long_sms_ucs2(self, content: str, reference_num: int = None) -> List[Tuple[int, str]]:
+    def _encode_ucs2_segment(self, text: str, segment_num: int, total_segments: int,
+                            reference_num: int = None) -> str:
         """
-        将长短信内容编码为UCS2格式，并添加UDH信息
+        将文本编码为UCS2格式，并添加UDH头（长短信用）
 
         Args:
-            content: 原始短信内容
-            reference_num: 长短信的唯一参考号（0-255），如果为None则随机生成
+            text: 原始文本
+            segment_num: 当前段序号 (1-based)
+            total_segments: 总段数
+            reference_num: 参考号，如果为None则随机生成
 
         Returns:
-            列表，每个元素为(数据字节长度, 包含UDH的完整十六进制字符串)
+            包含UDH头的完整UCS2十六进制字符串
         """
-        MAX_SEGMENT_CHARS = 67  # 每段最多67个字符（UCS2）
-
         if reference_num is None:
             reference_num = random.randint(1, 255)
 
+        # 构建UDH (User Data Header)
+        # 对于文本模式中的长短信，UDH作为特殊字符放在短信开头
+        # UDH格式: \x05\x00\x03\xRR\xTT\xSS
+        # 05: UDH长度 (5字节)
+        # 00: 信息元素标识 (连接短信)
+        # 03: 信息元素数据长度 (3字节)
+        # RR: 参考号 (0-255)
+        # TT: 总段数
+        # SS: 当前段序号 (1-based)
+        ref_byte = reference_num & 0xFF
+        total_segments_byte = total_segments & 0xFF
+        current_segment_byte = segment_num & 0xFF
+
+        # 创建UDH字符串（Unicode字符）
+        # 这些是控制字符，在UCS2中编码为相应的码点
+        udh_chars = [
+            chr(0x0500),  # UDH长度指示
+            chr(0x0000),  # 信息元素标识
+            chr(0x0003),  # 信息元素数据长度
+            chr(ref_byte),  # 参考号
+            chr(total_segments_byte),  # 总段数
+            chr(current_segment_byte)  # 当前段序号
+        ]
+        udh_string = ''.join(udh_chars)
+
+        # 将UDH字符串和原始文本组合
+        full_text = udh_string + text
+
+        # 转换为UCS2十六进制
+        return to_ucs2_hex(full_text)
+
+    def _split_content_with_udh(self, content: str, reference_num: int = None) -> List[Tuple[int, str, int, int]]:
+        """
+        将长短信内容分割并添加UDH头
+
+        Args:
+            content: 原始短信内容
+            reference_num: 长短信的唯一参考号
+
+        Returns:
+            列表，每个元素为(段落序号, 编码后的UCS2十六进制, 段落序号, 总段落数)
+        """
+        if reference_num is None:
+            reference_num = random.randint(1, 255)
+
+        MAX_CHARS_PER_SEGMENT = 67  # 每段最多67个字符（因为有6个字符被UDH占用）
         total_chars = len(content)
-        num_segments = math.ceil(total_chars / MAX_SEGMENT_CHARS)
+
+        if total_chars <= 70:
+            # 短消息，直接返回单条
+            text_ucs2 = to_ucs2_hex(content)
+            return [(1, text_ucs2, 1, 1)]
+
+        # 计算需要多少段
+        num_segments = math.ceil(total_chars / MAX_CHARS_PER_SEGMENT)
 
         segments = []
 
         for segment_index in range(num_segments):
-            start = segment_index * MAX_SEGMENT_CHARS
-            end = start + MAX_SEGMENT_CHARS
+            segment_num = segment_index + 1
+            start = segment_index * MAX_CHARS_PER_SEGMENT
+            end = start + MAX_CHARS_PER_SEGMENT
             segment_text = content[start:end]
 
-            # === 构建UDH (User Data Header) ===
-            # UDH结构: 05 00 03 RR TT SS
-            # 05: UDH长度 (5字节)
-            # 00: 信息元素标识 (连接短信)
-            # 03: 信息元素数据长度 (3字节)
-            # RR: 参考号 (0-255)
-            # TT: 总段数
-            # SS: 当前段序号 (1-based)
-            ref_byte = reference_num & 0xFF
-            total_segments_byte = num_segments & 0xFF
-            current_segment_byte = (segment_index + 1) & 0xFF
+            # 编码当前段落（带UDH头）
+            segment_ucs2 = self._encode_ucs2_segment(
+                segment_text, segment_num, num_segments, reference_num
+            )
 
-            udh_hex = f"050003{ref_byte:02X}{total_segments_byte:02X}{current_segment_byte:02X}"
+            segments.append((segment_num, segment_ucs2, segment_num, num_segments))
 
-            # 将短信内容转换为UCS2十六进制
-            content_hex = to_ucs2_hex(segment_text)
+            logger.debug(f"📑 编码第 {segment_num}/{num_segments} 段，参考号: {reference_num}，长度: {len(segment_text)}字符")
 
-            # 组合UDH和内容
-            full_message_hex = udh_hex + content_hex
-
-            # 计算数据字节长度 (十六进制字符串长度 / 2)
-            data_length = len(full_message_hex) // 2
-
-            segments.append((data_length, full_message_hex))
-
-            logger.debug(f"📑 编码第 {current_segment_byte}/{total_segments_byte} 段，参考号: {ref_byte}，长度: {data_length}字节")
-
-        logger.info(f"📨 长短信编码完成：{total_chars} 字符 -> {len(segments)} 段，参考号: {reference_num}")
+        logger.info(f"📨 长短信分割完成：{total_chars} 字符 -> {len(segments)} 段，参考号: {reference_num}")
         return segments
-
-    def _prepare_single_sms_ucs2(self, content: str) -> Tuple[int, str]:
-        """
-        准备单条短信的UCS2编码
-
-        Args:
-            content: 短信内容
-
-        Returns:
-            (数据字节长度, UCS2十六进制字符串)
-        """
-        content_hex = to_ucs2_hex(content)
-        data_length = len(content_hex) // 2
-        return (data_length, content_hex)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -178,7 +214,7 @@ class SMSSender:
     )
     async def send_sms(self, phone_number: str, content: str) -> SMSResult:
         """
-        发送短信 - 自动处理长短信分割和UDH编码
+        发送短信 - 自动处理长短信分割
 
         Args:
             phone_number: 手机号码
@@ -187,12 +223,11 @@ class SMSSender:
         Returns:
             发送结果（如果是长短信，返回第一段的发送结果）
         """
-        phone_ucs2 = to_ucs2_hex(phone_number)
         total_chars = len(content)
 
         if total_chars <= 70:
             # 单条短信
-            return await self._send_encoded_sms(phone_ucs2, content, 1, 1)
+            return await self._send_single_sms(phone_number, content, 1, 1)
         else:
             # 长短信，使用新方法
             logger.warning(f"⚠️ 内容长度 {total_chars} 字符，需要分割发送")
@@ -212,7 +247,7 @@ class SMSSender:
 
     async def send_long_sms(self, phone_number: str, content: str) -> List[SMSResult]:
         """
-        发送长短信（自动分割和UDH编码）
+        发送长短信（自动分割和添加UDH头）
 
         Args:
             phone_number: 手机号码
@@ -221,34 +256,33 @@ class SMSSender:
         Returns:
             所有段落的发送结果列表
         """
-        phone_ucs2 = to_ucs2_hex(phone_number)
         total_chars = len(content)
 
         if total_chars <= 70:
             # 单条短信
-            result = await self._send_encoded_sms(phone_ucs2, content, 1, 1)
+            result = await self._send_single_sms(phone_number, content, 1, 1)
             return [result]
 
         logger.info(f"📨 开始发送长短信：{total_chars} 字符")
 
-        # 编码长短信
-        encoded_segments = self._encode_long_sms_ucs2(content)
+        # 分割并编码短信内容
+        encoded_segments = self._split_content_with_udh(content)
         total_segments = len(encoded_segments)
 
         results = []
 
-        for i, (data_length, full_message_hex) in enumerate(encoded_segments):
-            segment_num = i + 1
-
-            logger.info(f"🔄 发送第 {segment_num}/{total_segments} 段 ({data_length} 字节)")
+        for segment_num, segment_ucs2, seg_num, total_segs in encoded_segments:
+            logger.info(f"🔄 发送第 {segment_num}/{total_segments} 段")
 
             # 发送当前段落
-            result = await self._send_pdu_sms(phone_ucs2, data_length, full_message_hex, segment_num, total_segments)
+            result = await self._send_encoded_sms(
+                phone_number, segment_ucs2, segment_num, total_segments
+            )
             results.append(result)
 
             # 如果不是最后一段，等待一下再发送下一段
             if segment_num < total_segments:
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(2)  # 增加等待时间，避免调制解调器过载
 
         # 统计结果
         success_count = sum(1 for r in results if r.success)
@@ -256,14 +290,36 @@ class SMSSender:
 
         return results
 
-    async def _send_encoded_sms(self, phone_ucs2: str, content: str,
+    async def _send_single_sms(self, phone_number: str, content: str,
                                segment_num: int = 1, total_segments: int = 1) -> SMSResult:
         """
-        发送单条编码短信（内部方法）
+        发送单条短信（内部方法）
 
         Args:
-            phone_ucs2: UCS2编码的手机号码
+            phone_number: 手机号码
             content: 短信内容
+            segment_num: 段落序号
+            total_segments: 总段落数
+
+        Returns:
+            发送结果
+        """
+        # 将内容编码为UCS2
+        content_ucs2 = to_ucs2_hex(content)
+
+        # 发送编码后的短信
+        return await self._send_encoded_sms(
+            phone_number, content_ucs2, segment_num, total_segments
+        )
+
+    async def _send_encoded_sms(self, phone_number: str, content_ucs2: str,
+                               segment_num: int = 1, total_segments: int = 1) -> SMSResult:
+        """
+        发送已编码的短信（内部方法）
+
+        Args:
+            phone_number: 手机号码
+            content_ucs2: 已编码的UCS2十六进制字符串
             segment_num: 段落序号
             total_segments: 总段落数
 
@@ -282,14 +338,44 @@ class SMSSender:
                 total_segments=total_segments
             )
 
+        logger.info(f"📱 发送短信到: {phone_number}")
+        if total_segments > 1:
+            logger.info(f"📑 段落: {segment_num}/{total_segments}")
+
         try:
-            # 准备发送
+            # 1. 确保调制解调器就绪
             await self._send_at_command("AT", wait_time=0.5)
             await self._send_at_command("ATE0", wait_time=0.5)
-            await self._send_at_command("AT+CMGF=1", wait_time=0.5)
-            await self._send_at_command('AT+CSCS="UCS2"', wait_time=0.5)
 
-            # 传统文本模式发送
+            # 2. 确保文本模式和UCS2编码
+            response = await self._send_at_command("AT+CMGF=1", wait_time=0.5)
+            if "OK" not in response:
+                logger.error(f"设置文本模式失败: {response}")
+                return SMSResult(
+                    message_id=message_id,
+                    success=False,
+                    status_code=500,
+                    status_message=f"设置文本模式失败: {response}",
+                    segment_number=segment_num,
+                    total_segments=total_segments
+                )
+
+            response = await self._send_at_command('AT+CSCS="UCS2"', wait_time=0.5)
+            if "OK" not in response:
+                logger.error(f"设置UCS2编码失败: {response}")
+                return SMSResult(
+                    message_id=message_id,
+                    success=False,
+                    status_code=500,
+                    status_message=f"设置UCS2编码失败: {response}",
+                    segment_number=segment_num,
+                    total_segments=total_segments
+                )
+
+            # 3. 转换电话号码为UCS2十六进制
+            phone_ucs2 = to_ucs2_hex(phone_number)
+
+            # 4. 发送AT+CMGS命令
             cmd = f'AT+CMGS="{phone_ucs2}"'
             logger.debug(f"📤 发送命令: {cmd}")
 
@@ -299,7 +385,7 @@ class SMSSender:
             self.serial.write(f"{cmd}\r".encode())
             await asyncio.sleep(1.0)
 
-            # 等待提示符
+            # 5. 等待提示符
             response = self.serial.read_all().decode('utf-8', errors='ignore')
             if ">" not in response:
                 await asyncio.sleep(1.0)
@@ -317,16 +403,21 @@ class SMSSender:
                         total_segments=total_segments
                     )
 
-            # 发送内容
-            text_ucs2 = to_ucs2_hex(content)
+            # 6. 发送已编码的内容
             logger.info("📤 发送短信内容...")
-            self.serial.write(text_ucs2.encode())
+
+            # 将十六进制字符串转换为字节并发送
+            data_bytes = bytes.fromhex(content_ucs2)
+            self.serial.write(data_bytes)
             await asyncio.sleep(0.5)
+
+            # 发送Ctrl+Z结束符
             self.serial.write(b'\x1A')
 
-            # 等待响应
+            # 7. 等待响应
             final_response = await self._wait_for_response()
 
+            # 8. 解析响应
             return self._parse_response(
                 message_id, final_response, segment_num, total_segments
             )
@@ -338,130 +429,6 @@ class SMSSender:
                 success=False,
                 status_code=500,
                 status_message=f"发送异常: {str(e)}",
-                segment_number=segment_num,
-                total_segments=total_segments
-            )
-
-    async def _send_pdu_sms(self, phone_ucs2: str, data_length: int,
-                           full_message_hex: str, segment_num: int,
-                           total_segments: int) -> SMSResult:
-        """
-        使用PDU模式发送编码后的短信（用于长短信）
-
-        Args:
-            phone_ucs2: UCS2编码的手机号码
-            data_length: 数据字节长度
-            full_message_hex: 完整的十六进制数据
-            segment_num: 段落序号
-            total_segments: 总段落数
-
-        Returns:
-            发送结果
-        """
-        message_id = str(uuid.uuid4())
-
-        if not self.serial or not self.serial.is_open:
-            return SMSResult(
-                message_id=message_id,
-                success=False,
-                status_code=500,
-                status_message="调制解调器未连接",
-                segment_number=segment_num,
-                total_segments=total_segments
-            )
-
-        full_response = ""
-
-        try:
-            # 重置调制解调器状态
-            response1 = await self._send_at_command("AT", wait_time=0.5)
-            full_response += f"AT响应: {response1}\n"
-
-            response2 = await self._send_at_command("ATE0", wait_time=0.5)
-            full_response += f"ATE0响应: {response2}\n"
-
-            # 重要：切换为PDU模式 (AT+CMGF=0)
-            response3 = await self._send_at_command("AT+CMGF=0", wait_time=1.0)
-            full_response += f"AT+CMGF=0响应: {response3}\n"
-
-            if "OK" not in response3:
-                logger.error(f"切换到PDU模式失败: {response3}")
-                return SMSResult(
-                    message_id=message_id,
-                    success=False,
-                    status_code=500,
-                    status_message="切换到PDU模式失败",
-                    raw_response=full_response,
-                    segment_number=segment_num,
-                    total_segments=total_segments
-                )
-
-            # 发送AT+CMGS命令（带数据长度）
-            cmd = f"AT+CMGS={data_length}"
-            logger.debug(f"📤 PDU模式发送命令: {cmd}")
-
-            self.serial.reset_input_buffer()
-            self.serial.reset_output_buffer()
-
-            self.serial.write(f"{cmd}\r".encode())
-            await asyncio.sleep(1.0)
-
-            # 等待提示符
-            response4 = self.serial.read_all().decode('utf-8', errors='ignore')
-            full_response += f"AT+CMGS响应: {response4}\n"
-
-            if ">" not in response4:
-                await asyncio.sleep(1.0)
-                response4_extra = self.serial.read_all().decode('utf-8', errors='ignore')
-                full_response += f"AT+CMGS额外响应: {response4_extra}\n"
-                response4 += response4_extra
-
-                if ">" not in response4:
-                    logger.error(f"PDU模式未收到>提示符，响应: {response4}")
-                    return SMSResult(
-                        message_id=message_id,
-                        success=False,
-                        status_code=500,
-                        status_message="调制解调器未准备好(PDU模式)",
-                        raw_response=full_response,
-                        segment_number=segment_num,
-                        total_segments=total_segments
-                    )
-
-            # 发送完整的PDU数据
-            logger.info(f"📤 发送PDU数据 ({data_length} 字节)...")
-
-            # 将十六进制字符串转换为字节并发送
-            pdu_data = bytes.fromhex(full_message_hex)
-            self.serial.write(pdu_data)
-            await asyncio.sleep(0.5)
-
-            # 发送Ctrl+Z结束符
-            self.serial.write(b'\x1A')
-            logger.info("✅ 已发送PDU数据 + Ctrl+Z")
-
-            # 等待响应
-            final_response = await self._wait_for_response()
-            full_response += f"最终响应: {final_response}\n"
-
-            logger.debug(f"📨 PDU模式最终响应: {final_response[:200]}")
-
-            # 解析响应
-            result = self._parse_response(
-                message_id, final_response, segment_num, total_segments
-            )
-            result.raw_response = full_response
-
-            return result
-
-        except Exception as e:
-            logger.error(f"💥 PDU模式发送异常: {e}", exc_info=True)
-            return SMSResult(
-                message_id=message_id,
-                success=False,
-                status_code=500,
-                status_message=f"PDU发送异常: {str(e)}",
-                raw_response=full_response + f"\n异常: {str(e)}",
                 segment_number=segment_num,
                 total_segments=total_segments
             )
