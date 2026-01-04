@@ -94,15 +94,18 @@ class ConsulClient:
         else:
             meta["kv_path"] = self.kv_path
 
-        # 健康检查配置
-        health_check = {
-            "TCP": f"{address}:{port}",
-            "Interval": "10s",
-            "Timeout": "5s",
-            "DeregisterCriticalServiceAfter": "30s"
-        }
-
         try:
+            # 先注册TTL检查
+            check_id = f"service:{self.service_id}"
+            self.client.agent.check.register(
+                name="Service TTL Check",
+                check_id=check_id,
+                ttl="30s",
+                notes="Heartbeat check for SMS service",
+                service_id=self.service_id,
+                service_name=service_name
+            )
+
             # 注册服务
             self.client.agent.service.register(
                 name=service_name,
@@ -111,11 +114,19 @@ class ConsulClient:
                 port=port,
                 tags=tags,
                 meta=meta,
-                check=health_check
+                # 不再在这里设置check，因为我们已经注册了TTL检查
+                check={
+                    "CheckID": check_id,
+                    "Name": "Service TTL Check",
+                    "TTL": "30s"
+                }
             )
 
             self.registered = True
             logger.info(f"服务 {service_name} 注册成功 (ID: {self.service_id})")
+
+            # 立即发送一次心跳，激活TTL检查
+            self.client.agent.check.ttl_pass(check_id, notes="Service started")
 
             # 注册KV
             await self._register_kv(service_desc, server_data)
@@ -154,6 +165,11 @@ class ConsulClient:
             return True
 
         try:
+            # 先删除检查
+            check_id = f"service:{self.service_id}"
+            self.client.agent.check.deregister(check_id)
+
+            # 再注销服务
             self.client.agent.service.deregister(self.service_id)
             logger.info(f"服务 {self.service_name} 注销成功")
 
@@ -199,8 +215,9 @@ class ConsulClient:
 
         while self.registered and self.service_id:
             try:
-                await asyncio.sleep(30)
+                await asyncio.sleep(20)  # 每20秒发送一次心跳
                 self.client.agent.check.ttl_pass(check_id, notes="healthy")
+                logger.debug(f"心跳发送成功: {check_id}")
             except asyncio.CancelledError:
                 break
             except Exception as e:
