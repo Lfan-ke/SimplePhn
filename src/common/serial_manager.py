@@ -226,11 +226,9 @@ class SerialManager:
         # 首先尝试获取最佳调制解调器
         modem = await self.get_best_modem()
         if not modem:
-            # 如果没有最佳调制解调器，尝试轮询
             modem = await self.get_round_robin_modem()
 
         if not modem:
-            # 如果还没有，尝试任何可用的调制解调器
             async with self._stats_lock:
                 for m in self.modems.values():
                     if m.is_available and not m.in_use:
@@ -248,11 +246,24 @@ class SerialManager:
             logger.info(f"📱 使用调制解调器 {modem.info.port} 发送短信到: {phone_number}")
             logger.info(f"📄 内容长度: {len(content)} 字符")
 
-            # 发送短信
-            result = await modem.sender.send_sms(phone_number, content)
+            # 根据内容长度决定发送方式
+            if len(content) <= 70:
+                # 短消息，使用原方法
+                result = await modem.sender.send_sms(phone_number, content)
+                success = result.success
+                message = result.status_message
+            else:
+                # 长消息，使用新的长短信方法
+                logger.info(f"📨 检测到长短信 ({len(content)} 字符)，启动分段发送")
+                results = await modem.sender.send_long_sms(phone_number, content)
 
-            success = result.success
-            message = result.status_message
+                # 检查所有段落是否都成功
+                success = all(r.success for r in results)
+                if success:
+                    message = f"长短信发送完成 ({len(results)} 段)"
+                else:
+                    failed_segments = [i+1 for i, r in enumerate(results) if not r.success]
+                    message = f"长短信发送部分失败，失败的段落: {failed_segments}"
 
             return success, message, modem.info.port
 
