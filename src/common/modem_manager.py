@@ -133,7 +133,9 @@ class ModemManager:
         all_ports = []
         for pattern in self.config.modem.port_patterns:
             try:
+                logger.debug(f"正在处理Glob模式: {pattern}")
                 matched_ports = glob.glob(pattern)
+                logger.debug(f"匹配到串口: {matched_ports}")
                 all_ports.extend(matched_ports)
             except Exception as e:
                 logger.warning(f"Glob模式 {pattern} 错误: {e}")
@@ -145,7 +147,7 @@ class ModemManager:
             logger.warning(f"未找到匹配的串口: {self.config.modem.port_patterns}")
             return []
 
-        logger.debug(f"找到串口: {all_ports}")
+        logger.debug(f"找到的全部串口: {all_ports}")
 
         # 并发检测所有端口
         tasks = [self._test_modem_port(port) for port in all_ports]
