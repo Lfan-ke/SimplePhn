@@ -42,7 +42,7 @@ class ModemConfig(BaseModel):
     @classmethod
     def validate_port_patterns(cls, v: list[str]) -> list[str]:
         """根据操作系统调整端口模式"""
-        if os.name == 'nt':
+        if os.name == 'nt':  # Windows
             return ["COM*"] if not v else v
         return v
 

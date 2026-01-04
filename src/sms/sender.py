@@ -3,7 +3,7 @@
 """
 import time
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, List
 from loguru import logger
 
 
@@ -84,7 +84,7 @@ class SMSSender:
                 "error": str(e)
             }
 
-    async def send_batch(self, phone_numbers: list, content: str, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def send_batch(self, phone_numbers: List[str], content: str, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         批量发送短信
 

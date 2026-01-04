@@ -1,5 +1,5 @@
 """
-SMS 微服务主程序
+SMS 微服务主程序入口
 """
 import asyncio
 import signal

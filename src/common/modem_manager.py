@@ -1,5 +1,5 @@
 """
-调制解调器管理器 - 支持多调制解调器、负载均衡、异步锁
+调制解调器管理器（支持多调制解调器、负载均衡、异步锁）
 """
 import asyncio
 import glob
@@ -49,6 +49,15 @@ class ManagedModem:
         """计算成功率"""
         total = self.success_count + self.failure_count
         return self.success_count / total if total > 0 else 1.0
+
+    def is_alive(self) -> bool:
+        """检查调制解调器是否存活"""
+        try:
+            if self.modem and hasattr(self.modem, 'serial') and self.modem.serial:
+                return self.modem.serial.is_open
+            return False
+        except:
+            return False
 
 
 class ModemManager:
@@ -133,9 +142,7 @@ class ModemManager:
         all_ports = []
         for pattern in self.config.modem.port_patterns:
             try:
-                logger.debug(f"正在处理Glob模式: {pattern}")
                 matched_ports = glob.glob(pattern)
-                logger.debug(f"匹配到串口: {matched_ports}")
                 all_ports.extend(matched_ports)
             except Exception as e:
                 logger.warning(f"Glob模式 {pattern} 错误: {e}")
@@ -147,7 +154,7 @@ class ModemManager:
             logger.warning(f"未找到匹配的串口: {self.config.modem.port_patterns}")
             return []
 
-        logger.debug(f"找到的全部串口: {all_ports}")
+        logger.debug(f"找到串口: {all_ports}")
 
         # 并发检测所有端口
         tasks = [self._test_modem_port(port) for port in all_ports]
@@ -167,43 +174,71 @@ class ModemManager:
     async def _test_modem_port(self, port: str) -> Optional[ModemInfo]:
         """测试调制解调器端口"""
         try:
-            # 检查端口是否存在
+            # 检查端口是否存在（Linux/Unix）
+            if os.name != 'nt' and not os.path.exists(port):
+                return None
+
             if not HAS_GSMMODEM:
                 return None
 
-            # 创建调制解调器实例
+            # 创建调制解调器实例（根据官方文档）
             modem = GsmModem(
                 port=port,
                 baudrate=self.config.modem.baudrate
             )
 
             # 尝试连接
-            modem.connect(self.config.modem.pin)
+            try:
+                modem.connect(self.config.modem.pin)
+                connected = True
+            except PinRequiredError:
+                logger.debug(f"需要 PIN 码: {port}")
+                return None
+            except Exception as e:
+                logger.debug(f"连接失败 {port}: {e}")
+                return None
 
-            if modem.connected:
-                # 获取调制解调器信息
+            if not connected:
+                return None
+
+            # 获取调制解调器信息
+            try:
+                manufacturer = modem.manufacturer or "Unknown"
+                model = modem.model or "Unknown"
+                imei = modem.imei or ""
+
+                # 获取信号强度
+                signal_strength = 0
+                try:
+                    signal_strength = modem.signalStrength
+                except:
+                    pass
+
                 modem_info = ModemInfo(
                     port=port,
-                    manufacturer=modem.manufacturer or "Unknown",
-                    model=modem.model or "Unknown",
-                    imei=modem.imei or "",
-                    signal_strength=modem.signalStrength or 0,
+                    manufacturer=manufacturer,
+                    model=model,
+                    imei=imei,
+                    signal_strength=signal_strength,
                     is_connected=True
                 )
 
-                # 关闭连接（测试完成后）
-                modem.close()
+                # 关闭调制解调器（测试完成后）
+                try:
+                    modem.close()
+                except:
+                    pass
+
                 return modem_info
 
-            modem.close()
-            return None
+            except Exception as e:
+                logger.debug(f"获取调制解调器信息失败 {port}: {e}")
+                try:
+                    modem.close()
+                except:
+                    pass
+                return None
 
-        except PinRequiredError:
-            logger.warning(f"需要 PIN 码: {port}")
-            return None
-        except (TimeoutException, CommandError) as e:
-            logger.debug(f"调制解调器测试失败 {port}: {e}")
-            return None
         except Exception as e:
             logger.debug(f"测试端口 {port} 失败: {e}")
             return None
@@ -211,21 +246,32 @@ class ModemManager:
     async def _connect_modem(self, modem_info: ModemInfo) -> Optional[Any]:
         """连接调制解调器"""
         try:
+            # 创建调制解调器实例
             modem = GsmModem(
                 port=modem_info.port,
                 baudrate=self.config.modem.baudrate
             )
 
+            # 连接调制解调器
             modem.connect(self.config.modem.pin)
 
-            if modem.connected:
-                logger.info(f"✅ 连接调制解调器: {modem_info.port}")
-                return modem
+            # 等待网络覆盖
+            try:
+                signal = modem.waitForNetworkCoverage(30)
+                modem_info.signal_strength = signal
+                logger.info(f"📶 调制解调器 {modem_info.port} 网络覆盖正常，信号强度: {signal}")
+            except Exception as e:
+                logger.warning(f"⚠️ 调制解调器 {modem_info.port} 网络覆盖检查失败: {e}")
+                # 继续使用，可能信号弱或暂时无网络
 
+            logger.info(f"✅ 连接调制解调器: {modem_info.port}")
+            return modem
+
+        except PinRequiredError:
+            logger.error(f"❌ 需要 PIN 码: {modem_info.port}")
             return None
-
         except Exception as e:
-            logger.error(f"连接调制解调器失败 {modem_info.port}: {e}")
+            logger.error(f"❌ 连接调制解调器失败 {modem_info.port}: {e}")
             return None
 
     @asynccontextmanager
@@ -262,8 +308,14 @@ class ModemManager:
 
         try:
             # 确保调制解调器连接
-            if not modem.modem or not modem.modem.connected:
+            if not modem.is_alive():
                 logger.info(f"重新连接调制解调器: {modem.info.port}")
+                try:
+                    if modem.modem:
+                        modem.modem.close()
+                except:
+                    pass
+
                 modem.modem = await self._connect_modem(modem.info)
 
                 if not modem.modem:
@@ -323,19 +375,25 @@ class ModemManager:
 
                 start_time = time.time()
 
-                # 发送短信（gsmmodem 自动处理长短信）
-                response = modem.modem.sendSms(phone_number, content, unicode=True)
+                # 发送短信（根据官方文档，使用 unicode=True 处理中文）
+                response = modem.modem.sendSms(
+                    destination=phone_number,
+                    text=content,
+                    waitForDeliveryReport=False,
+                    unicode=True  # 启用 Unicode 支持
+                )
+
                 elapsed_time = time.time() - start_time
 
-                # 处理响应
+                # 处理响应（根据官方文档，sendSms 返回 SentSms 对象）
                 if isinstance(response, list):
-                    # 长短信
-                    success = all(msg.status == 'SENT' for msg in response)
+                    # 长短信，返回多个消息
+                    success = all(msg.status in ['ENROUTE', 'DELIVERED'] for msg in response)
                     message = f"长短信发送完成 ({len(response)} 段)"
                     total_segments = len(response)
                 else:
                     # 单条短信
-                    success = response.status == 'SENT'
+                    success = response.status in ['ENROUTE', 'DELIVERED']
                     message = "短信发送成功" if success else f"发送失败: {response.status}"
                     total_segments = 1
 
@@ -349,6 +407,18 @@ class ModemManager:
                         logger.error(f"❌ 发送失败: {message}")
 
                 return success, message, modem.info.port
+
+            except CommandError as e:
+                logger.error(f"❌ AT 命令错误 {modem.info.port}: {e}")
+                async with self._lock:
+                    modem.failure_count += 1
+                return False, f"AT命令错误: {str(e)}", modem.info.port
+
+            except TimeoutException as e:
+                logger.error(f"⏰ 发送超时 {modem.info.port}: {e}")
+                async with self._lock:
+                    modem.failure_count += 1
+                return False, f"发送超时: {str(e)}", modem.info.port
 
             except Exception as e:
                 logger.error(f"💥 发送短信失败 {modem.info.port}: {e}")
@@ -372,11 +442,7 @@ class ModemManager:
         for modem in self.modems.values():
             # 获取当前信号强度
             signal_strength = modem.info.signal_strength
-            if modem.modem and modem.modem.connected:
-                try:
-                    signal_strength = modem.modem.signalStrength
-                except:
-                    pass
+            is_alive = modem.is_alive()
 
             status["modems"].append({
                 "port": modem.info.port,
@@ -390,7 +456,7 @@ class ModemManager:
                 "failure_count": modem.failure_count,
                 "success_rate": round(modem.success_rate, 3),
                 "last_used": round(time.time() - modem.last_used, 1),
-                "is_connected": modem.modem is not None and modem.modem.connected
+                "is_alive": is_alive
             })
 
         return status
@@ -405,12 +471,10 @@ class ModemManager:
 
         for modem in self.modems.values():
             try:
-                if modem.modem and modem.modem.connected:
-                    # 简单的 AT 命令测试
-                    modem.modem.write("AT\r")
-                    response = modem.modem._readResponse()
-                    if "OK" in response:
-                        healthy_count += 1
+                if modem.is_alive():
+                    # 尝试发送 AT 命令测试
+                    modem.modem.write("AT", waitForResponse=True, timeout=2.0)
+                    healthy_count += 1
             except:
                 pass
 
