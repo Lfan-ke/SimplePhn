@@ -200,7 +200,7 @@ class ConsulClient:
         while self.registered and self.service_id:
             try:
                 await asyncio.sleep(30)
-                self.client.agent.check.ttl_pass(check_id, output="healthy")
+                self.client.agent.check.ttl_pass(check_id, notes="healthy")
             except asyncio.CancelledError:
                 break
             except Exception as e:
