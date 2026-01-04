@@ -1,5 +1,5 @@
 """
-SMS gRPC服务器实现
+SMS gRPC服务器实现 - 支持多调制解调器管理
 """
 import json
 import time
@@ -9,36 +9,39 @@ import grpc
 from loguru import logger
 
 from . import sms_pb2, sms_pb2_grpc
-from .sms_sender import SMSSender
+from src.common.serial_manager import SerialManager
 
 
 class SMSService(sms_pb2_grpc.SMSServiceServicer):
     """SMS服务实现"""
 
-    def __init__(self, sms_sender: SMSSender):
-        self.sms_sender = sms_sender
+    def __init__(self, serial_manager: SerialManager):
+        self.serial_manager = serial_manager
 
     async def SendSMS(self, request, context) -> sms_pb2.SendSMSResponse:
         """发送单条短信"""
         logger.info(f"📨 发送短信: {request.phone_number}")
 
         try:
-            # 发送短信
-            result = await self.sms_sender.send_sms(
+            # 通过串口管理器发送短信
+            success, message, modem_port = await self.serial_manager.send_sms(
                 phone_number=request.phone_number,
                 content=request.content
             )
 
             # 构建响应数据
             response_data = {
-                "message_id": result.message_id,
-                "timestamp": result.timestamp,
-                "modem_port": self.sms_sender.port,
+                "message_id": str(uuid.uuid4()),
+                "timestamp": time.time(),
                 "phone_number": request.phone_number,
                 "content_length": len(request.content),
-                "success": result.success,
-                "reference": result.data
+                "success": success,
+                "message": message
             }
+
+            # 添加调制解调器信息
+            if modem_port:
+                response_data["modem_port"] = modem_port
 
             # 添加请求元数据
             if request.metadata:
@@ -50,9 +53,11 @@ class SMSService(sms_pb2_grpc.SMSServiceServicer):
             if request.delivery_report:
                 response_data["delivery_report"] = True
 
+            status_code = 200 if success else 500
+
             return sms_pb2.SendSMSResponse(
-                status=result.status_code,
-                message=result.status_message,
+                status=status_code,
+                message=message,
                 data=json.dumps(response_data, ensure_ascii=False)
             )
 
@@ -80,25 +85,28 @@ class SMSService(sms_pb2_grpc.SMSServiceServicer):
         try:
             for phone_number in request.phone_numbers:
                 try:
-                    # 发送单条短信
-                    result = await self.sms_sender.send_sms(
+                    # 通过串口管理器发送短信
+                    success, message, modem_port = await self.serial_manager.send_sms(
                         phone_number=phone_number,
                         content=request.content
                     )
 
                     # 记录结果
                     result_data = {
-                        "message_id": result.message_id,
+                        "message_id": str(uuid.uuid4()),
                         "phone_number": phone_number,
-                        "status": result.status_code,
-                        "message": result.status_message,
-                        "timestamp": result.timestamp,
-                        "success": result.success
+                        "status": 200 if success else 500,
+                        "message": message,
+                        "timestamp": time.time(),
+                        "success": success
                     }
+
+                    if modem_port:
+                        result_data["modem_port"] = modem_port
 
                     results.append(result_data)
 
-                    if result.success:
+                    if success:
                         success_count += 1
                     else:
                         failed_count += 1
@@ -161,37 +169,42 @@ class SMSService(sms_pb2_grpc.SMSServiceServicer):
     async def HealthCheck(self, request, context) -> sms_pb2.HealthCheckResponse:
         """健康检查"""
         try:
-            # 检查调制解调器连接
-            modem_ok = await self.sms_sender.test_connection()
+            if not self.serial_manager:
+                return sms_pb2.HealthCheckResponse(
+                    status=503,
+                    message="服务不健康: 串口管理器未初始化",
+                    data=json.dumps({
+                        "timestamp": time.time(),
+                        "service_ready": False,
+                        "error": "serial_manager_not_initialized"
+                    }, ensure_ascii=False)
+                )
 
-            if modem_ok:
-                # 获取信号强度
-                signal_strength = await self.sms_sender.get_signal_strength()
+            # 获取串口管理器状态
+            health_status = await self.serial_manager.get_health_status()
 
-                health_data = {
-                    "timestamp": time.time(),
-                    "modem_connected": True,
-                    "modem_port": self.sms_sender.port,
-                    "signal_strength": signal_strength,
-                    "service_ready": True
-                }
+            # 测试连接
+            connected = await self.serial_manager.test_all_connections()
 
+            health_data = {
+                "timestamp": time.time(),
+                "service_ready": connected,
+                "available_modems": health_status["available_modems"],
+                "total_modems": health_status["total_modems"],
+                "in_use_modems": health_status["in_use_modems"],
+                "modems": health_status["modems"]
+            }
+
+            if connected and health_status["available_modems"] > 0:
                 return sms_pb2.HealthCheckResponse(
                     status=200,
                     message="服务健康",
                     data=json.dumps(health_data, ensure_ascii=False)
                 )
             else:
-                health_data = {
-                    "timestamp": time.time(),
-                    "modem_connected": False,
-                    "service_ready": False,
-                    "error": "调制解调器未连接"
-                }
-
                 return sms_pb2.HealthCheckResponse(
                     status=503,
-                    message="服务不健康: 调制解调器未连接",
+                    message=f"服务不健康: {health_status['available_modems']}/{health_status['total_modems']} 个调制解调器可用",
                     data=json.dumps(health_data, ensure_ascii=False)
                 )
 

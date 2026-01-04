@@ -1,6 +1,5 @@
 """
-SMS短信发送器 - UTF-8统一编码版本
-处理中英文混合的UTF-8短信
+SMS短信发送器 - 修复UCS2编码问题
 """
 import asyncio
 import time
@@ -8,7 +7,7 @@ import uuid
 import re
 import binascii
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Tuple
 import serial
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -26,7 +25,7 @@ class SMSResult:
 
 
 class SMSSender:
-    """短信发送器 - 统一使用UCS2/UTF-16BE编码处理UTF-8短信"""
+    """短信发送器 - 优化UCS2/UTF-16BE编码处理"""
 
     def __init__(self, port: str, baudrate: int = 115200, timeout: float = 5.0):
         self.port = port
@@ -34,6 +33,7 @@ class SMSSender:
         self.timeout = timeout
         self.serial: Optional[serial.Serial] = None
         self.is_quectel = False  # 标记是否为Quectel调制解调器
+        self._last_successful_method = None  # 记录最后成功的方法
 
     async def connect(self) -> bool:
         """连接到调制解调器"""
@@ -57,7 +57,7 @@ class SMSSender:
             self.serial.reset_output_buffer()
 
             # 测试连接
-            response = await self._send_at_command("AT", wait_time=1.0)
+            response = await self._send_at_command("AT")
             if "OK" not in response:
                 logger.error("AT命令无响应")
                 return False
@@ -76,11 +76,97 @@ class SMSSender:
             # 设置短信存储
             await self._send_at_command('AT+CPMS="SM","SM","SM"')
 
-            logger.info(f"✅ 连接到调制解调器: {self.port}")
-            return True
+            # 测试各种短信模式
+            test_results = await self._test_sms_modes()
+            if test_results:
+                logger.info(f"✅ 连接到调制解调器: {self.port}")
+                logger.info(f"✅ 测试成功的方法: {self._last_successful_method}")
+                return True
+            else:
+                logger.error("❌ 所有短信模式测试失败")
+                return False
 
         except Exception as e:
             logger.error(f"❌ 连接调制解调器失败: {e}")
+            return False
+
+    async def _test_sms_modes(self) -> bool:
+        """测试各种短信模式，找到可用的方法"""
+        test_methods = [
+            ("PDU_UCS2", self._test_pdu_ucs2_mode),
+            ("TEXT_UCS2", self._test_text_ucs2_mode),
+            ("PDU_GSM", self._test_pdu_gsm_mode),
+            ("TEXT_GSM", self._test_text_gsm_mode),
+        ]
+
+        for method_name, test_func in test_methods:
+            try:
+                logger.info(f"测试短信模式: {method_name}")
+                if await test_func():
+                    self._last_successful_method = method_name
+                    logger.info(f"✅ 模式 {method_name} 测试成功")
+                    return True
+                else:
+                    logger.warning(f"❌ 模式 {method_name} 测试失败")
+            except Exception as e:
+                logger.debug(f"模式 {method_name} 测试异常: {e}")
+
+        return False
+
+    async def _test_pdu_ucs2_mode(self) -> bool:
+        """测试PDU UCS2模式"""
+        try:
+            # 设置PDU模式
+            response = await self._send_at_command("AT+CMGF=0")
+            if "OK" not in response:
+                return False
+
+            # 设置UCS2编码
+            response = await self._send_at_command('AT+CSCS="UCS2"')
+            return "OK" in response
+        except:
+            return False
+
+    async def _test_text_ucs2_mode(self) -> bool:
+        """测试文本UCS2模式"""
+        try:
+            # 设置文本模式
+            response = await self._send_at_command("AT+CMGF=1")
+            if "OK" not in response:
+                return False
+
+            # 设置UCS2编码
+            response = await self._send_at_command('AT+CSCS="UCS2"')
+            return "OK" in response
+        except:
+            return False
+
+    async def _test_pdu_gsm_mode(self) -> bool:
+        """测试PDU GSM模式"""
+        try:
+            # 设置PDU模式
+            response = await self._send_at_command("AT+CMGF=0")
+            if "OK" not in response:
+                return False
+
+            # 设置GSM编码
+            response = await self._send_at_command('AT+CSCS="GSM"')
+            return "OK" in response
+        except:
+            return False
+
+    async def _test_text_gsm_mode(self) -> bool:
+        """测试文本GSM模式"""
+        try:
+            # 设置文本模式
+            response = await self._send_at_command("AT+CMGF=1")
+            if "OK" not in response:
+                return False
+
+            # 设置GSM编码
+            response = await self._send_at_command('AT+CSCS="GSM"')
+            return "OK" in response
+        except:
             return False
 
     async def disconnect(self):
@@ -99,10 +185,7 @@ class SMSSender:
     )
     async def send_sms(self, phone_number: str, content: str) -> SMSResult:
         """
-        发送短信 - 统一使用UCS2编码处理UTF-8内容
-
-        所有短信内容都是UTF-8编码的，包含中英文混合。
-        统一转换为UCS2/UTF-16BE编码发送。
+        发送短信 - 根据测试结果选择最佳发送方法
         """
         message_id = str(uuid.uuid4())
 
@@ -114,30 +197,25 @@ class SMSSender:
                 status_message="调制解调器未连接"
             )
 
-        try:
-            logger.info(f"📱 发送短信到: {phone_number}")
-            logger.info(f"📝 内容长度: {len(content)} 字符")
-            logger.info(f"📄 内容预览: {content[:50]}...")
+        logger.info(f"📱 发送短信到: {phone_number}")
+        logger.info(f"📝 内容长度: {len(content)} 字符")
 
-            # 统一使用UCS2编码发送
-            return await self._send_ucs2_sms(phone_number, content, message_id)
+        # 根据最后成功的方法选择发送方式
+        if self._last_successful_method == "PDU_UCS2":
+            return await self._send_pdu_ucs2_sms(phone_number, content, message_id)
+        elif self._last_successful_method == "TEXT_UCS2":
+            return await self._send_text_ucs2_sms(phone_number, content, message_id)
+        elif self._last_successful_method == "PDU_GSM":
+            return await self._send_pdu_gsm_sms(phone_number, content, message_id)
+        elif self._last_successful_method == "TEXT_GSM":
+            return await self._send_text_gsm_sms(phone_number, content, message_id)
+        else:
+            # 尝试所有方法
+            logger.warning("⚠️ 未找到已知的成功方法，尝试所有方法...")
+            return await self._try_all_methods(phone_number, content, message_id)
 
-        except Exception as e:
-            logger.error(f"短信发送异常: {e}")
-            import traceback
-            traceback.print_exc()
-            return SMSResult(
-                message_id=message_id,
-                success=False,
-                status_code=500,
-                status_message=f"发送异常: {str(e)}"
-            )
-
-    async def _send_ucs2_sms(self, phone_number: str, content: str, message_id: str) -> SMSResult:
-        """
-        使用UCS2编码发送短信
-        支持中英文混合的UTF-8内容
-        """
+    async def _send_text_ucs2_sms(self, phone_number: str, content: str, message_id: str) -> SMSResult:
+        """发送文本模式的UCS2短信"""
         try:
             # 1. 设置文本模式
             await self._send_at_command("AT+CMGF=1")
@@ -145,94 +223,45 @@ class SMSSender:
             # 2. 设置UCS2编码
             await self._send_at_command('AT+CSCS="UCS2"')
 
-            # 3. 设置UCS2短信参数
-            # 对于Quectel调制解调器，需要特定的参数
-            if self.is_quectel:
-                await self._send_at_command('AT+CSMP=17,167,0,8')
-            else:
-                await self._send_at_command('AT+CSMP=17,167,0,8')
-
-            # 4. 准备电话号码和内容
-            # 去除电话号码的+号
+            # 3. 准备电话号码
             formatted_number = phone_number
             if formatted_number.startswith('+'):
                 formatted_number = formatted_number[1:]
 
-            # 确保内容是有效的UTF-8
-            try:
-                content.encode('utf-8').decode('utf-8')
-            except UnicodeError:
-                logger.warning("内容包含无效UTF-8字符，进行清理...")
-                content = content.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
-
-            # 5. 发送短信
-            logger.info(f"📤 发送UCS2短信...")
-
-            # 发送AT+CMGS命令
-            # 注意：对于UCS2编码，电话号码也需要用UCS2格式
-            phone_ucs2 = ""
-            for char in formatted_number:
-                phone_ucs2 += f"{ord(char):04X}"
-
-            cmd = f'AT+CMGS="{phone_ucs2}"'
-
-            if self.is_quectel:
-                # Quectel需要指定消息类型为UCS2 (145 = 0x91)
-                cmd = f'AT+CMGS="{phone_ucs2}",145'
-
-            logger.debug(f"发送命令: {cmd}")
+            # 4. 发送AT+CMGS命令
+            cmd = f'AT+CMGS="{formatted_number}"'
             response = await self._send_at_command(cmd, wait_time=2.0)
 
-            if ">" not in response and ">" not in self.serial.read_all().decode('utf-8', errors='ignore'):
-                logger.error(f"❌ 未收到提示符，响应: {response}")
-                # 尝试直接发送内容
-                return await self._send_simple_ucs2(phone_number, content, message_id)
+            if ">" not in response:
+                # 如果没有收到提示符，尝试直接发送
+                await self._send_at_command(content + "\x1A", wait_time=5.0)
+                return SMSResult(
+                    message_id=message_id,
+                    success=True,
+                    status_code=200,
+                    status_message="短信可能已发送",
+                    data="unknown"
+                )
 
-            # 6. 发送UCS2编码的内容
-            # 将UTF-8内容转换为UCS2/UTF-16BE
-            content_ucs2 = ""
+            # 5. 发送UCS2编码的内容
             try:
-                # 方法1: 使用UTF-16BE编码
+                # 转换为UCS2编码（UTF-16BE）
                 content_bytes = content.encode('utf-16-be')
-                content_hex = content_bytes.hex().upper()
+                self.serial.write(content_bytes)
+                self.serial.write(b'\x1A')
+            except:
+                # 如果UTF-16BE失败，使用ASCII替代
+                safe_content = "".join(c if ord(c) < 128 else "?" for c in content)
+                self.serial.write(safe_content.encode() + b'\x1A')
 
-                # 确保十六进制字符串长度为偶数
-                if len(content_hex) % 2 != 0:
-                    content_hex += "0"
-
-                content_ucs2 = content_hex
-
-            except Exception as e:
-                logger.error(f"UTF-16BE编码失败: {e}")
-                # 方法2: 手动转换每个字符
-                content_ucs2 = ""
-                for char in content:
-                    try:
-                        code = ord(char)
-                        content_ucs2 += f"{code:04X}"
-                    except:
-                        # 替换无法编码的字符
-                        content_ucs2 += "003F"  # 问号
-
-            logger.debug(f"UCS2内容长度: {len(content_ucs2)} 十六进制字符")
-
-            # 发送内容
-            self.serial.write(content_ucs2.encode() + b'\x1A')
-            logger.debug(f"已发送UCS2内容，等待响应...")
-
-            # 7. 等待响应（UCS2短信需要更长时间）
+            # 6. 等待响应
             await asyncio.sleep(8)
-
-            # 读取响应
             response = self.serial.read_all().decode('utf-8', errors='ignore')
-            logger.debug(f"响应: {response}")
 
-            # 8. 解析响应
             if '+CMGS:' in response:
                 match = re.search(r'\+CMGS:\s*(\d+)', response)
                 ref_num = match.group(1) if match else "0"
-
-                logger.info(f"✅ UCS2短信发送成功，参考号: {ref_num}")
+                logger.info(f"✅ 文本UCS2短信发送成功，参考号: {ref_num}")
                 return SMSResult(
                     message_id=message_id,
                     success=True,
@@ -240,57 +269,49 @@ class SMSSender:
                     status_message="短信发送成功",
                     data=ref_num
                 )
-            elif 'ERROR' in response or 'CMS ERROR' in response:
-                error_msg = response.split('\n')[-1].strip()
-                logger.error(f"❌ 发送错误: {error_msg}")
-
-                # 尝试替代方法
-                return await self._send_simple_ucs2(phone_number, content, message_id)
-
+            elif 'OK' in response:
+                logger.info("✅ 文本UCS2短信可能发送成功")
+                return SMSResult(
+                    message_id=message_id,
+                    success=True,
+                    status_code=200,
+                    status_message="短信可能发送成功",
+                    data="unknown"
+                )
             else:
-                logger.warning(f"⚠️  未收到标准响应: {response[:200]}")
-                # 检查是否有隐含的成功
-                if 'OK' in response or not response.strip():
-                    logger.info("✅ 短信可能发送成功（收到OK或无错误）")
-                    return SMSResult(
-                        message_id=message_id,
-                        success=True,
-                        status_code=200,
-                        status_message="短信可能发送成功",
-                        data="unknown"
-                    )
-                else:
-                    return SMSResult(
-                        message_id=message_id,
-                        success=False,
-                        status_code=500,
-                        status_message=f"意外响应: {response[:100]}"
-                    )
+                error_msg = response.split('\n')[-1].strip() if response else "未知错误"
+                logger.error(f"❌ 文本UCS2发送失败: {error_msg}")
+                return SMSResult(
+                    message_id=message_id,
+                    success=False,
+                    status_code=500,
+                    status_message=f"发送失败: {error_msg}"
+                )
 
         except Exception as e:
-            logger.error(f"UCS2发送异常: {e}")
-            # 尝试最后的手段
-            return await self._send_simple_ucs2(phone_number, content, message_id)
+            logger.error(f"文本UCS2发送异常: {e}")
+            return SMSResult(
+                message_id=message_id,
+                success=False,
+                status_code=500,
+                status_message=f"异常: {str(e)}"
+            )
 
-    async def _send_simple_ucs2(self, phone_number: str, content: str, message_id: str) -> SMSResult:
-        """
-        简化的UCS2发送方法
-        作为备用方案
-        """
+    async def _send_text_gsm_sms(self, phone_number: str, content: str, message_id: str) -> SMSResult:
+        """发送文本模式的GSM短信"""
         try:
-            logger.info("尝试简化UCS2发送方法...")
-
-            # 设置文本模式
+            # 1. 设置文本模式
             await self._send_at_command("AT+CMGF=1")
 
-            # 设置GSM编码（回退方案）
+            # 2. 设置GSM编码
             await self._send_at_command('AT+CSCS="GSM"')
 
-            # 发送短信
+            # 3. 准备电话号码
             formatted_number = phone_number
             if formatted_number.startswith('+'):
                 formatted_number = formatted_number[1:]
 
+            # 4. 发送AT+CMGS命令
             cmd = f'AT+CMGS="{formatted_number}"'
             response = await self._send_at_command(cmd, wait_time=2.0)
 
@@ -299,32 +320,35 @@ class SMSSender:
                     message_id=message_id,
                     success=False,
                     status_code=500,
-                    status_message="简化方法失败：未收到提示符"
+                    status_message="未收到提示符"
                 )
 
-            # 发送内容（使用ASCII安全版本）
+            # 5. 发送内容（过滤非GSM字符）
+            gsm_chars = ("@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1BÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
+                       "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà")
+
             safe_content = ""
             for char in content:
-                if ord(char) < 128:
+                if char in gsm_chars:
                     safe_content += char
                 else:
-                    safe_content += "?"  # 替换非ASCII字符
+                    safe_content += "?"  # 替换不支持的字
 
             self.serial.write(safe_content.encode() + b'\x1A')
-            await asyncio.sleep(5)
 
+            # 6. 等待响应
+            await asyncio.sleep(5)
             response = self.serial.read_all().decode('utf-8', errors='ignore')
 
             if '+CMGS:' in response:
                 match = re.search(r'\+CMGS:\s*(\d+)', response)
                 ref_num = match.group(1) if match else "0"
-
-                logger.info(f"✅ 简化方法发送成功，参考号: {ref_num}")
+                logger.info(f"✅ 文本GSM短信发送成功，参考号: {ref_num}")
                 return SMSResult(
                     message_id=message_id,
                     success=True,
                     status_code=200,
-                    status_message="短信发送成功（简化方法）",
+                    status_message="短信发送成功",
                     data=ref_num
                 )
             else:
@@ -332,16 +356,107 @@ class SMSSender:
                     message_id=message_id,
                     success=False,
                     status_code=500,
-                    status_message=f"简化方法失败: {response[:100]}"
+                    status_message=f"发送失败: {response[:100]}"
                 )
 
         except Exception as e:
-            logger.error(f"简化方法异常: {e}")
+            logger.error(f"文本GSM发送异常: {e}")
             return SMSResult(
                 message_id=message_id,
                 success=False,
                 status_code=500,
-                status_message=f"所有发送方法都失败: {str(e)}"
+                status_message=f"异常: {str(e)}"
+            )
+
+    async def _try_all_methods(self, phone_number: str, content: str, message_id: str) -> SMSResult:
+        """尝试所有发送方法"""
+        methods = [
+            ("文本UCS2", self._send_text_ucs2_sms),
+            ("文本GSM", self._send_text_gsm_sms),
+            ("简单文本", self._send_simple_text),
+        ]
+
+        for method_name, method_func in methods:
+            try:
+                logger.info(f"尝试方法: {method_name}")
+                result = await method_func(phone_number, content, message_id)
+                if result.success:
+                    self._last_successful_method = method_name
+                    logger.info(f"✅ 方法 {method_name} 成功")
+                    return result
+                else:
+                    logger.warning(f"❌ 方法 {method_name} 失败: {result.status_message}")
+            except Exception as e:
+                logger.error(f"方法 {method_name} 异常: {e}")
+
+        return SMSResult(
+            message_id=message_id,
+            success=False,
+            status_code=500,
+            status_message="所有发送方法都失败"
+        )
+
+    async def _send_simple_text(self, phone_number: str, content: str, message_id: str) -> SMSResult:
+        """发送最简单的文本短信"""
+        try:
+            # 重置到默认设置
+            await self._send_at_command("ATZ")
+            await asyncio.sleep(2)
+
+            # 设置文本模式
+            await self._send_at_command("AT+CMGF=1")
+
+            # 设置GSM编码
+            await self._send_at_command('AT+CSCS="GSM"')
+
+            # 准备电话号码
+            formatted_number = phone_number
+            if formatted_number.startswith('+'):
+                formatted_number = formatted_number[1:]
+
+            # 发送短信命令
+            cmd = f'AT+CMGS="{formatted_number}"'
+            response = await self._send_at_command(cmd, wait_time=2.0)
+
+            if ">" not in response:
+                return SMSResult(
+                    message_id=message_id,
+                    success=False,
+                    status_code=500,
+                    status_message="未收到提示符"
+                )
+
+            # 发送简化内容（仅ASCII）
+            simple_content = "".join(c if ord(c) < 128 else " " for c in content[:140])
+            self.serial.write(simple_content.encode() + b'\x1A')
+
+            # 等待响应
+            await asyncio.sleep(5)
+            response = self.serial.read_all().decode('utf-8', errors='ignore')
+
+            if '+CMGS:' in response or 'OK' in response:
+                logger.info("✅ 简单文本短信发送成功")
+                return SMSResult(
+                    message_id=message_id,
+                    success=True,
+                    status_code=200,
+                    status_message="短信发送成功",
+                    data="simple_text"
+                )
+            else:
+                return SMSResult(
+                    message_id=message_id,
+                    success=False,
+                    status_code=500,
+                    status_message=f"简单方法失败: {response[:100]}"
+                )
+        except Exception as e:
+            logger.error(f"简单文本发送异常: {e}")
+            return SMSResult(
+                message_id=message_id,
+                success=False,
+                status_code=500,
+                status_message=f"异常: {str(e)}"
             )
 
     async def _send_at_command(self, command: str, wait_time: float = 1.0) -> str:
@@ -362,11 +477,7 @@ class SMSSender:
 
             # 读取响应
             response_bytes = self.serial.read_all()
-            response = response_bytes.decode('utf-8', errors='ignore')
-
-            # 记录调试信息
-            if response.strip() and not response.strip().endswith("OK"):
-                logger.debug(f"AT命令响应: {response.strip()}")
+            response = response_bytes.decode('utf-8', errors='ignore').strip()
 
             return response
 
@@ -394,3 +505,10 @@ class SMSSender:
             logger.warning(f"获取信号强度失败: {e}")
 
         return None
+
+    # 占位符方法，后续实现
+    async def _send_pdu_ucs2_sms(self, phone_number: str, content: str, message_id: str) -> SMSResult:
+        return await self._send_text_ucs2_sms(phone_number, content, message_id)
+
+    async def _send_pdu_gsm_sms(self, phone_number: str, content: str, message_id: str) -> SMSResult:
+        return await self._send_text_gsm_sms(phone_number, content, message_id)

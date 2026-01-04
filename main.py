@@ -1,5 +1,5 @@
 """
-SMS微服务主程序 - 完全修复信号处理版本
+SMS微服务主程序 - 支持多调制解调器管理
 """
 import asyncio
 import signal
@@ -12,10 +12,9 @@ import grpc
 from loguru import logger
 
 from src.common.config import ConfigManager
-from src.common.serial_detector import SerialDetector
+from src.common.serial_manager import SerialManager
 from src.sms_service import sms_pb2_grpc
 from src.sms_service.server import SMSService
-from src.sms_service.sms_sender import SMSSender
 from src.sms_service.consul_client import ConsulClient
 
 
@@ -25,13 +24,13 @@ class SMSMicroservice:
     def __init__(self, config_path: str = "config/sms.yaml"):
         self.config_path = Path(config_path)
         self.config: Optional[ConfigManager] = None
-        self.serial_detector: Optional[SerialDetector] = None
-        self.sms_sender: Optional[SMSSender] = None
+        self.serial_manager: Optional[SerialManager] = None
         self.consul_client: Optional[ConsulClient] = None
         self.grpc_server: Optional[grpc.aio.Server] = None
         self._shutdown_event = asyncio.Event()
         self._shutting_down = False
         self._main_task: Optional[asyncio.Task] = None
+        self._health_task: Optional[asyncio.Task] = None
 
     async def start(self) -> bool:
         """启动微服务"""
@@ -52,38 +51,18 @@ class SMSMicroservice:
             # 3. 打印配置信息
             await self._print_config(cfg)
 
-            # 4. 检测调制解调器
-            logger.info("📡 检测调制解调器...")
-            self.serial_detector = SerialDetector(self.config)
-            modems = await self.serial_detector.detect_modems()
+            # 4. 初始化串口管理器（检测并连接所有调制解调器）
+            logger.info("📡 初始化串口管理器...")
+            self.serial_manager = SerialManager(self.config)
 
-            if not modems:
-                logger.error("❌ 未检测到可用的调制解调器")
+            if not await self.serial_manager.initialize():
+                logger.error("❌ 串口管理器初始化失败")
                 return False
 
-            # 选择最佳调制解调器
-            best_modem = self.serial_detector.get_best_modem()
-            if not best_modem:
-                logger.error("❌ 无法选择调制解调器")
-                return False
+            # 获取健康状态
+            health_status = await self.serial_manager.get_health_status()
 
-            logger.info(f"✅ 使用调制解调器: {best_modem.port} ({best_modem.manufacturer} {best_modem.model})")
-
-            # 5. 初始化短信发送器
-            serial_config = cfg.serial
-            self.sms_sender = SMSSender(
-                port=best_modem.port,
-                baudrate=serial_config.baudrate,
-                timeout=serial_config.timeout
-            )
-
-            # 连接到调制解调器
-            connected = await self.sms_sender.connect()
-            if not connected:
-                logger.error("❌ 调制解调器连接失败")
-                return False
-
-            # 6. 解析监听地址
+            # 5. 解析监听地址
             host, port_str = cfg.server.listen_on.split(":")
             port = int(port_str)
 
@@ -91,7 +70,7 @@ class SMSMicroservice:
             if host in ["0.0.0.0", "127.0.0.1", "[::]", "[::1]"]:
                 host = socket.gethostbyname(socket.gethostname())
 
-            # 7. 注册到Consul
+            # 6. 注册到Consul
             if cfg.consul.host and cfg.consul.host != "127.0.0.1:8500":
                 logger.info(f"🔗 连接Consul: {cfg.consul.host}")
 
@@ -128,30 +107,37 @@ class SMSMicroservice:
                     scheme=cfg.consul.scheme
                 )
 
+                meta = {
+                    "version": "1.0.0",
+                    "available_modems": str(health_status["available_modems"]),
+                    "total_modems": str(health_status["total_modems"])
+                }
+
+                # 添加调制解调器信息
+                for i, modem in enumerate(health_status["modems"][:3]):  # 只显示前3个
+                    meta[f"modem_{i+1}_port"] = modem["port"]
+                    meta[f"modem_{i+1}_signal"] = modem["signal_strength"]
+
                 if await self.consul_client.register_service(
                     service_name=cfg.server.name,
                     address=host,
                     port=port,
                     service_desc="短信发送微服务，支持中文短信",
                     server_data=server_data,
-                    meta={
-                        "version": "1.0.0",
-                        "modem_port": best_modem.port,
-                        "modem_model": best_modem.model,
-                        "signal": best_modem.signal_strength
-                    }
+                    meta=meta
                 ):
                     logger.info("✅ Consul注册成功")
                 else:
                     logger.warning("⚠️ Consul注册失败，服务继续运行")
 
-            # 8. 启动gRPC服务器
+            # 7. 启动gRPC服务器
             server_config = cfg.server
             self.grpc_server = grpc.aio.server(
                 futures.ThreadPoolExecutor(max_workers=server_config.max_workers)
             )
 
-            sms_service = SMSService(self.sms_sender)
+            # 使用串口管理器创建服务
+            sms_service = SMSService(self.serial_manager)
             sms_pb2_grpc.add_SMSServiceServicer_to_server(sms_service, self.grpc_server)
 
             self.grpc_server.add_insecure_port(server_config.listen_on)
@@ -160,16 +146,51 @@ class SMSMicroservice:
             logger.info(f"✅ gRPC服务器启动在 {server_config.listen_on}")
             logger.info(f"📱 服务名称: {server_config.name}")
             logger.info(f"🔧 运行模式: {server_config.mode}")
+            logger.info(f"📡 可用调制解调器: {health_status['available_modems']}/{health_status['total_modems']}")
+
+            # 打印调制解调器详情
+            for modem in health_status["modems"]:
+                status = "✅ 可用" if modem["is_available"] else "❌ 不可用"
+                in_use = " (使用中)" if modem["in_use"] else ""
+                logger.info(f"   {modem['port']}: {modem['manufacturer']} {modem['model']} - 信号: {modem['signal_strength']} {status}{in_use}")
 
             if cfg.consul.host and cfg.consul.host != "127.0.0.1:8500":
                 logger.info(f"🌐 Consul地址: {cfg.consul.host}")
                 logger.info(f"🗂️ KV路径: echo_wing/{cfg.server.name}")
 
+            # 8. 启动健康检查任务
+            self._health_task = asyncio.create_task(self._health_check_task())
+
             return True
 
         except Exception as e:
             logger.error(f"❌ 服务启动失败: {e}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
             return False
+
+    async def _health_check_task(self):
+        """健康检查任务"""
+        try:
+            while not self._shutting_down:
+                await asyncio.sleep(30)  # 每30秒检查一次
+
+                if not self.serial_manager:
+                    continue
+
+                # 测试连接
+                connected = await self.serial_manager.test_all_connections()
+                if not connected:
+                    logger.warning("⚠️ 健康检查: 部分调制解调器连接失败")
+
+                # 打印状态
+                health_status = await self.serial_manager.get_health_status()
+                logger.debug(f"📊 调制解调器状态: {health_status['available_modems']}/{health_status['total_modems']} 可用")
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"健康检查任务异常: {e}")
 
     async def run(self):
         """运行服务主循环"""
@@ -192,6 +213,14 @@ class SMSMicroservice:
         self._shutting_down = True
         logger.info("🛑 停止SMS微服务...")
 
+        # 取消健康检查任务
+        if self._health_task:
+            self._health_task.cancel()
+            try:
+                await self._health_task
+            except asyncio.CancelledError:
+                pass
+
         # 取消主任务
         if self._main_task:
             self._main_task.cancel()
@@ -211,19 +240,18 @@ class SMSMicroservice:
         # 停止gRPC服务器
         if self.grpc_server:
             try:
-                # 立即停止，不再等待
                 await self.grpc_server.stop(grace=0)
                 logger.info("✅ gRPC服务器已停止")
             except Exception as e:
                 logger.error(f"❌ 停止gRPC服务器失败: {e}")
 
-        # 断开调制解调器连接
-        if self.sms_sender:
+        # 清理串口管理器
+        if self.serial_manager:
             try:
-                await self.sms_sender.disconnect()
-                logger.info("✅ 调制解调器连接已断开")
+                await self.serial_manager.cleanup()
+                logger.info("✅ 串口管理器已清理")
             except Exception as e:
-                logger.error(f"❌ 断开调制解调器连接失败: {e}")
+                logger.error(f"❌ 清理串口管理器失败: {e}")
 
         logger.info("👋 SMS微服务已停止")
 
@@ -231,9 +259,10 @@ class SMSMicroservice:
         """请求关闭服务"""
         if not self._shutdown_event.is_set():
             self._shutdown_event.set()
-            # 立即取消主任务
             if self._main_task:
                 self._main_task.cancel()
+            if self._health_task:
+                self._health_task.cancel()
 
     async def wait_for_shutdown(self):
         """等待关闭信号"""
