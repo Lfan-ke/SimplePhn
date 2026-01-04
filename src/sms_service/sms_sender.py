@@ -130,10 +130,16 @@ class SMSSender:
                     status_message="设置文本模式失败"
                 )
 
-            # 尝试设置字符集为 GSM（大多数调制解调器默认为 GSM），不强制 UCS2
-            response = await self._send_at_command('AT+CSCS="GSM"', wait_time=1.0)
-            if "OK" not in response:
-                logger.debug("未能设置 CSCS 为 GSM，使用调制解调器默认字符集")
+            # 根据内容决定字符集：若包含非 ASCII 字符，则使用 UCS2（可以支持中文/Emoji）
+            use_ucs2 = any(ord(ch) > 127 for ch in content)
+            if use_ucs2:
+                response = await self._send_at_command('AT+CSCS="UCS2"', wait_time=1.0)
+                if "OK" not in response:
+                    logger.warning("设置 CSCS 为 UCS2 失败，尝试继续（调制解调器可能不支持 UCS2）")
+            else:
+                response = await self._send_at_command('AT+CSCS="GSM"', wait_time=1.0)
+                if "OK" not in response:
+                    logger.debug("未能设置 CSCS 为 GSM，使用调制解调器默认字符集")
 
             # 准备电话号码（去掉+号）
             formatted_number = phone_number
@@ -166,9 +172,16 @@ class SMSSender:
             # 发送短信内容（UTF-8编码）
             logger.info("📤 发送短信内容...")
 
-            # 尝试直接发送UTF-8文本
+            # 根据字符集决定发送格式：
+            # - UCS2: 发送 UTF-16BE 的十六进制表示（多数调制解调器在文本模式下要求以 hex 形式发送 UCS2）
+            # - 非 UCS2: 直接发送 UTF-8（对基本 GSM/ASCII 文本多数调制解调器兼容）
             try:
-                self.serial.write(content.encode('utf-8'))
+                if use_ucs2:
+                    hex_payload = content.encode('utf-16-be').hex().upper()
+                    self.serial.write(hex_payload.encode('ascii'))
+                else:
+                    self.serial.write(content.encode('utf-8'))
+
                 self.serial.write(b'\x1A')  # Ctrl+Z 结束
             except Exception as e:
                 logger.error(f"发送内容失败: {e}")
