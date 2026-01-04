@@ -65,7 +65,7 @@ class SMSSender:
 
             # 记录日志
             if success:
-                logger.info(f"✅ 短信发送成功: {phone_number} ({elapsed_time:.2f}s)")
+                logger.info(f"✅ 短信发送成功: {phone_number} via {modem_port} ({elapsed_time:.2f}s)")
             else:
                 logger.error(f"❌ 短信发送失败: {phone_number} - {message}")
 
@@ -104,6 +104,7 @@ class SMSSender:
         start_time = time.time()
 
         logger.info(f"📦 批量发送短信，数量: {len(phone_numbers)}")
+        logger.info(f"📄 内容长度: {len(content)} 字符")
 
         results = []
         success_count = 0
