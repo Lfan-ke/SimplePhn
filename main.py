@@ -29,7 +29,6 @@ class SMSMicroservice:
         self.sms_sender: Optional[SMSSender] = None
         self.consul_client: Optional[ConsulClient] = None
         self.grpc_server: Optional[grpc.aio.Server] = None
-        self.keep_alive_task: Optional[asyncio.Task] = None
 
     async def start(self) -> bool:
         """启动微服务"""
@@ -140,11 +139,6 @@ class SMSMicroservice:
                     }
                 ):
                     logger.info("✅ Consul注册成功")
-
-                    # 启动心跳任务
-                    self.keep_alive_task = asyncio.create_task(
-                        self.consul_client.keep_alive()
-                    )
                 else:
                     logger.warning("⚠️ Consul注册失败，服务继续运行")
 
@@ -177,14 +171,6 @@ class SMSMicroservice:
     async def stop(self):
         """停止微服务"""
         logger.info("🛑 停止SMS微服务...")
-
-        # 停止心跳任务
-        if self.keep_alive_task and not self.keep_alive_task.done():
-            self.keep_alive_task.cancel()
-            try:
-                await self.keep_alive_task
-            except asyncio.CancelledError:
-                pass
 
         # 注销Consul服务
         if self.consul_client:
