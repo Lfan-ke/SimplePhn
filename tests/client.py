@@ -444,7 +444,7 @@ async def main():
     parser.add_argument("--phone", default="+8619834717434", help="测试手机号码")
     parser.add_argument("--direct", help="直接连接地址 (跳过 Consul 发现)")
     parser.add_argument("--explore", action="store_true", help="探索 Consul 中的服务")
-    parser.add_argument("--test-long", action="store_true", help="测试长短信")
+    parser.add_argument("--test-long", default=True, action="store_true", help="测试长短信")
 
     args = parser.parse_args()
 
@@ -536,10 +536,9 @@ async def main():
         else:
             logger.error("❌ 测试短信发送失败")
 
-        # 4. 测试长短信（可选）
         if args.test_long:
             logger.info("\n4. 📨 测试长短信...")
-            long_content = "这是一个长短信测试，" * 50  # 约 300 字符
+            long_content = "这是一个长短信测试，" * 125  # 约 300 字符
 
             long_result = await client.send_sms(
                 phone_number=args.phone,

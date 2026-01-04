@@ -153,25 +153,10 @@ class ModemManager:
 
             logger.info(f"🔍 发现 {len(modem_ports)} 个调制解调器端口: {modem_ports}")
 
-            tasks = []
-            for port in modem_ports:
-                task = asyncio.create_task(self._initialize_modem(port))
-                tasks.append(task)
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            successful_modems = 0
-            for i, result in enumerate(results):
-                port = modem_ports[i]
-                if isinstance(result, Exception):
-                    logger.error(f"❌ 初始化调制解调器失败 {port}: {result}")
-                elif result:
-                    successful_modems += 1
-
-            self._initialized = successful_modems > 0
+            await self._initialize_modems_async(modem_ports)
 
             if self._initialized:
-                logger.info(f"✅ 调制解调器管理器初始化完成: {successful_modems}/{len(modem_ports)} 个调制解调器可用")
+                logger.info(f"✅ 调制解调器管理器初始化完成: {len(self.modems)}/{len(modem_ports)} 个调制解调器可用")
                 await self._log_modem_details()
             else:
                 logger.error("❌ 调制解调器管理器初始化失败: 没有可用的调制解调器")
@@ -210,9 +195,40 @@ class ModemManager:
             logger.warning("⚠️ 未发现任何调制解调器端口")
             return []
 
+    async def _initialize_modems_async(self, modem_ports: List[str]):
+        tasks = []
+        for port in modem_ports:
+            task = asyncio.create_task(self._initialize_modem_with_timeout(port))
+            tasks.append(task)
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        successful_modems = 0
+        for i, result in enumerate(results):
+            port = modem_ports[i]
+            if isinstance(result, Exception):
+                logger.debug(f"🔄 调制解调器初始化失败 {port}: {result}")
+            elif result:
+                successful_modems += 1
+
+        self._initialized = successful_modems > 0
+
+    async def _initialize_modem_with_timeout(self, port: str) -> bool:
+        try:
+            return await asyncio.wait_for(
+                self._initialize_modem(port),
+                timeout=self.config.modem.connection_timeout
+            )
+        except asyncio.TimeoutError:
+            logger.debug(f"⏰ 连接调制解调器超时: {port}")
+            return False
+        except Exception as e:
+            logger.debug(f"🔄 调制解调器初始化异常 {port}: {e}")
+            return False
+
     async def _initialize_modem(self, port: str) -> bool:
         try:
-            logger.info(f"🔄 初始化调制解调器: {port}")
+            logger.debug(f"🔄 初始化调制解调器: {port}")
 
             modem = GsmModem(
                 port=port,
@@ -220,7 +236,7 @@ class ModemManager:
                 incomingCallCallbackFunc=None,
                 smsReceivedCallbackFunc=None,
                 smsStatusReportCallback=None,
-                requestDelivery=True,
+                requestDelivery=False,
                 AT_CNMI=''
             )
 
@@ -262,16 +278,16 @@ class ModemManager:
             return True
 
         except PinRequiredError as e:
-            logger.error(f"❌ 调制解调器需要 PIN 码: {port}")
+            logger.debug(f"🔒 调制解调器需要 PIN 码: {port}")
             return False
         except IncorrectPinError as e:
-            logger.error(f"❌ PIN 码错误: {port}")
+            logger.debug(f"❌ PIN 码错误: {port}")
             return False
         except TimeoutException as e:
-            logger.error(f"⏰ 连接调制解调器超时: {port}")
+            logger.debug(f"⏰ 连接调制解调器超时: {port}")
             return False
         except Exception as e:
-            logger.error(f"💥 初始化调制解调器异常 {port}: {e}")
+            logger.debug(f"🔄 调制解调器初始化异常 {port}: {e}")
             return False
 
     async def send_sms(self, phone_number: str, message: str) -> Tuple[bool, str, str]:
