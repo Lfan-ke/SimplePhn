@@ -17,7 +17,7 @@ serial:
     - "/dev/ttyUSB*"
 
   baudrate: 115200
-  timeout: 2.0
+  timeout: 3.5
   write_timeout: 2.0
 
   max_retries: 3
