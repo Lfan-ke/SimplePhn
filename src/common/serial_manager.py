@@ -170,20 +170,22 @@ class SerialManager:
             return available_modems[self._round_robin_index]
 
     async def acquire_modem(self, modem: ManagedModem) -> bool:
-        """获取调制解调器锁"""
+        """获取调制解调器锁，设置更长超时时间"""
         if modem.in_use:
+            logger.warning(f"调制解调器 {modem.info.port} 正在使用中，等待释放...")
             return False
 
         try:
-            # 尝试获取锁，设置超时避免死锁
-            acquired = await asyncio.wait_for(modem.lock.acquire(), timeout=2.0)
+            # 尝试获取锁，设置较长的超时时间（默认25秒）
+            acquired = await asyncio.wait_for(modem.lock.acquire(), timeout=timeout)
             if acquired:
                 modem.in_use = True
                 modem.last_used = time.time()
+                logger.debug(f"✅ 获取调制解调器锁: {modem.info.port} (等待时间: {timeout}秒)")
                 return True
             return False
         except asyncio.TimeoutError:
-            logger.warning(f"⏰ 获取调制解调器锁超时: {modem.info.port}")
+            logger.warning(f"⏰ 获取调制解调器锁超时: {modem.info.port} (等待 {timeout} 秒后)")
             return False
         except Exception as e:
             logger.error(f"获取调制解调器锁失败 {modem.info.port}: {e}")

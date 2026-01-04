@@ -25,7 +25,7 @@ serial:
 
 log:
   mode: "console"
-  level: "info"
+  level: "debug"
   encoding: "plain"
   stat: false
   file_path: "logs/sms_service.log"
