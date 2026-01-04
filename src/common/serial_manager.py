@@ -1,5 +1,5 @@
 """
-串口管理器 - 管理多个调制解调器连接
+串口管理器 - 修复锁获取问题
 """
 import asyncio
 import time
@@ -54,6 +54,7 @@ class SerialManager:
         self._round_robin_index = 0
         self._init_complete = False
         self._stats_lock = asyncio.Lock()
+        self._lock_timeout = 25.0  # 锁获取超时时间（秒）
 
     async def initialize(self) -> bool:
         """初始化串口管理器"""
@@ -169,23 +170,28 @@ class SerialManager:
             self._round_robin_index = (self._round_robin_index + 1) % len(available_modems)
             return available_modems[self._round_robin_index]
 
-    async def acquire_modem(self, modem: ManagedModem) -> bool:
+    async def acquire_modem(self, modem: ManagedModem, lock_timeout: float = None) -> bool:
         """获取调制解调器锁，设置更长超时时间"""
+        if lock_timeout is None:
+            lock_timeout = self._lock_timeout
+
         if modem.in_use:
             logger.warning(f"调制解调器 {modem.info.port} 正在使用中，等待释放...")
             return False
 
         try:
             # 尝试获取锁，设置较长的超时时间（默认25秒）
-            acquired = await asyncio.wait_for(modem.lock.acquire(), timeout=timeout)
+            logger.debug(f"尝试获取调制解调器锁: {modem.info.port}，超时: {lock_timeout}秒")
+            acquired = await asyncio.wait_for(modem.lock.acquire(), timeout=lock_timeout)
             if acquired:
                 modem.in_use = True
                 modem.last_used = time.time()
-                logger.debug(f"✅ 获取调制解调器锁: {modem.info.port} (等待时间: {timeout}秒)")
+                logger.debug(f"✅ 获取调制解调器锁: {modem.info.port}")
                 return True
+            logger.warning(f"⏰ 获取调制解调器锁失败（超时）: {modem.info.port}")
             return False
         except asyncio.TimeoutError:
-            logger.warning(f"⏰ 获取调制解调器锁超时: {modem.info.port} (等待 {timeout} 秒后)")
+            logger.warning(f"⏰ 获取调制解调器锁超时: {modem.info.port} (等待 {lock_timeout} 秒后)")
             return False
         except Exception as e:
             logger.error(f"获取调制解调器锁失败 {modem.info.port}: {e}")
@@ -203,6 +209,7 @@ class SerialManager:
             modem.in_use = False
             if modem.lock.locked():
                 modem.lock.release()
+                logger.debug(f"✅ 释放调制解调器锁: {modem.info.port}")
         except Exception as e:
             logger.error(f"释放调制解调器锁失败 {modem.info.port}: {e}")
 
@@ -293,7 +300,7 @@ class SerialManager:
         results = []
         for modem in self.modems.values():
             try:
-                if await self.acquire_modem(modem):
+                if await self.acquire_modem(modem, lock_timeout=5.0):  # 健康检查使用较短超时
                     connected = await modem.test_connection()
                     await self.release_modem(modem, connected)
                     results.append((modem.info.port, connected))
