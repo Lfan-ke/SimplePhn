@@ -12,7 +12,7 @@ consul:
   health_check_timeout: "5s"
   deregister_after: "30s"
 
-serial:
+modem:
   port_patterns:
     - "/dev/ttyUSB*"
 
