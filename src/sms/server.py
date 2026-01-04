@@ -7,9 +7,13 @@ import grpc
 from concurrent import futures
 from loguru import logger
 
-from ..common.modem_manager import ModemManager
-from .sender import SMSSender
-from . import sms_pb2, sms_pb2_grpc
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from src.common.modem_manager import ModemManager
+from src.sms.sender import SMSSender
+from src.sms import sms_pb2, sms_pb2_grpc
 
 
 class SMSService(sms_pb2_grpc.SMSServiceServicer):
@@ -28,7 +32,8 @@ class SMSService(sms_pb2_grpc.SMSServiceServicer):
         try:
             # 构建元数据
             metadata = dict(request.metadata)
-            metadata['sender_id'] = request.sender_id or 'unknown'
+            if request.sender_id:
+                metadata['sender_id'] = request.sender_id
             metadata['delivery_report'] = str(request.delivery_report)
 
             # 发送短信
@@ -70,7 +75,8 @@ class SMSService(sms_pb2_grpc.SMSServiceServicer):
         try:
             # 构建元数据
             metadata = dict(request.metadata)
-            metadata['sender_id'] = request.sender_id or 'unknown'
+            if request.sender_id:
+                metadata['sender_id'] = request.sender_id
             metadata['delivery_report'] = str(request.delivery_report)
 
             # 批量发送短信
