@@ -237,11 +237,13 @@ class ModemManager:
                 smsReceivedCallbackFunc=None,
                 smsStatusReportCallback=None,
                 requestDelivery=False,
-                AT_CNMI=''
+                AT_CNMI='2,0,0,0,0'
             )
 
             logger.debug(f"  连接调制解调器: {port}")
             modem.connect(pin=self.config.modem.pin)
+
+            await self._disable_status_reports(modem)
 
             info = ModemInfo(
                 port=port,
@@ -289,6 +291,13 @@ class ModemManager:
         except Exception as e:
             logger.debug(f"🔄 调制解调器初始化异常 {port}: {e}")
             return False
+
+    async def _disable_status_reports(self, modem: GsmModem):
+        try:
+            modem.write('AT+CNMI=2,0,0,0,0', parseError=False, timeout=3)
+            logger.debug("  已禁用状态报告通知")
+        except Exception as e:
+            logger.debug(f"  禁用状态报告失败: {e}")
 
     async def send_sms(self, phone_number: str, message: str) -> Tuple[bool, str, str]:
         if not self._initialized:
