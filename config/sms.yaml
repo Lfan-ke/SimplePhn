@@ -27,7 +27,7 @@ modem:
 
 log:
   mode: "console"
-  level: "debug"
+  level: "info"
   encoding: "plain"
   stat: false
   file_path: "logs/sms_service.log"
