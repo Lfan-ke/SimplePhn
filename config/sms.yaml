@@ -1,5 +1,5 @@
 server:
-  name: "sms.rpc"
+  name: "ew.sms"
   listen_on: "0.0.0.0:50052"
   mode: "dev"
   max_workers: 10

@@ -31,7 +31,7 @@ class ConsulClient:
         host: str,
         token: str = "",
         scheme: str = "http",
-        kv_base_path: str = "simplephn/"
+        kv_base_path: str = "echo_wing/"
     ):
         # 解析主机和端口
         if ":" in host:
