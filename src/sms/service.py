@@ -63,11 +63,35 @@ class SMSMicroservice:
                 modem_status = await self.modem_manager.get_status()
 
                 server_data = {
-                    "version": "1.0.0",
-                    "protocol": "grpc",
-                    "features": ["sms", "long_sms", "unicode"],
-                    "modem_count": modem_status["total_modems"],
-                    "available_modems": modem_status["available_modems"]
+                    "fields": {
+                        "phone_number": {
+                            "type": "str",
+                            "description": "手机号码（国际格式，如+8613800138000）",
+                            "required": True,
+                            "pattern": "^\\+[1-9]\\d{1,14}$"  # E.164格式
+                        },
+                        "content": {
+                            "type": "str",
+                            "description": "短信内容",
+                            "required": True,
+                        },
+                        "sender_id": {
+                            "type": "str",
+                            "description": "发送者ID（可选）",
+                            "required": False
+                        },
+                        "delivery_report": {
+                            "type": "bool",
+                            "description": "是否要求送达报告",
+                            "required": False,
+                            "default": False
+                        },
+                        "metadata": {
+                            "type": "dict",
+                            "description": "元数据",
+                            "required": False
+                        }
+                    }
                 }
 
                 meta = {
