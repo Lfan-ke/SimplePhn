@@ -1,0 +1,25 @@
+[Unit]
+Description=SimplePhn SMS Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/heke1228/application/SimplePhn
+
+ExecStart=/usr/bin/uv run main.py
+
+Restart=on-failure
+RestartSec=10
+
+SupplementaryGroups=dialout
+
+ReadWritePaths=/dev/ttyUSB* /dev/ttyACM*
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=simplephn
+
+[Install]
+WantedBy=multi-user.target
