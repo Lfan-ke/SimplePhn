@@ -57,10 +57,11 @@ class SMSMicroservice:
             if host in ["0.0.0.0", "127.0.0.1", "[::]", "[::1]"]:
                 host = socket.gethostbyname(socket.gethostname())
 
-            modem_status = await self.modem_manager.get_status()
 
-            if cfg.consul.host and cfg.consul.host != "localhost:8500":
+            if cfg.consul.host:
                 logger.info(f"🔗 连接到 Consul: {cfg.consul.host}")
+
+                modem_status = await self.modem_manager.get_status()
 
                 server_data = {
                     "fields": {
