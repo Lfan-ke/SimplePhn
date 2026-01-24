@@ -33,6 +33,8 @@ class PulsarService:
         self.subscription_name = subscription_name or f"{service_name}-subscription"
         self.consumer_name = consumer_name or f"{service_name}-consumer"
 
+        self.max_redelivery_count = 3
+
         self.client = None
         self.consumer = None
         self.task = None
@@ -55,6 +57,8 @@ class PulsarService:
             ack_timeout_ms: ACK超时时间（毫秒）
             receiver_queue_size: 接收队列大小
         """
+
+        self.max_redelivery_count = max_redelivery_count
 
         async def _pulsar_listener() -> None:
             """Pulsar监听主函数"""
@@ -127,6 +131,16 @@ class PulsarService:
         try:
             await logger.trace(f"📨 [{self.service_name}] 收到消息: {msg_id}")
 
+            redelivery_count = msg.redelivery_count()
+            if redelivery_count > 0:
+                await logger.trace(f"🔄 [{self.service_name}] 第{redelivery_count}次重试")
+
+            # 检查是否已超过最大重试次数
+            if redelivery_count >= self.max_redelivery_count:
+                await logger.warn(f"💀 [{self.service_name}] 已达到最大重试次数({self.max_redelivery_count})，进入死信队列: {msg_id}")
+                await self._ack(msg)
+                return
+
             # 解析JSON
             try:
                 payload = json.loads(msg.data().decode('utf-8')) if msg.data() else {}
@@ -138,11 +152,6 @@ class PulsarService:
             # 添加服务标识
             payload["_service"] = self.service_name
             payload["_msg_id"] = str(msg_id)
-
-            # 查看重试次数
-            redelivery_count = getattr(msg, 'redelivery_count', lambda: 0)()
-            if redelivery_count > 0:
-                await logger.trace(f"🔄 [{self.service_name}] 第{redelivery_count}次重试")
 
             # 执行业务处理
             success = await message_handler(payload)
