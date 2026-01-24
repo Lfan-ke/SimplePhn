@@ -73,7 +73,7 @@ async def _wait_for_modem(max_attempts: int = 5) -> Optional[ModemWrapper]:
     Returns:
         ModemWrapper or None
     """
-    wait_times = [60, 180, 300, 420, 540]  # 1, 3, 5, 7, 9分钟
+    wait_times = [60, 120, 120, 120, 165]  # 1, 2, 2, 2, 3分钟
 
     for attempt in range(max_attempts):
         modem_wrapper = ModemWrapper.try_new()
@@ -164,8 +164,8 @@ def create_sms_task(sms_msg: SMSMessage) -> asyncio.Task[bool]:
                     formatted_lines.append(f"其他元数据:\n{other_fields}")
                 if formatted_lines:
                     sms_msg.content += (
-                        "\n" if not sms_msg.content.endswith("\n") else ""
-                    ) + "\n".join(formatted_lines)
+                        "\n\n" if not sms_msg.content.endswith("\n") else "\n"
+                    ) + "\n\n".join(formatted_lines)
 
             # 发送短信
             send_result = await modem_wrapper.send_sms(sms_msg.phone, sms_msg.content)

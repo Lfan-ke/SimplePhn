@@ -44,7 +44,7 @@ class PulsarService:
             message_handler: MessageHandler,
             max_redelivery_count: int = 3,
             negative_ack_delay_ms: int = 90000,   # 负确认重试延迟
-            ack_timeout_ms: int = 1200000,        # ACK超时时间
+            ack_timeout_ms: int = 600000,         # ACK超时时间
             receiver_queue_size: int = 1000
     ) -> asyncio.Task:
         """
@@ -89,7 +89,7 @@ class PulsarService:
                         topic=self.main_topic,
                         subscription_name=self.subscription_name,
                         consumer_name=self.consumer_name,
-                        consumer_type=pulsar.ConsumerType.Exclusive,
+                        consumer_type=pulsar.ConsumerType.Shared,
                         receiver_queue_size=receiver_queue_size,
                         dead_letter_policy=dead_letter_policy,                       # 应用死信策略
                         negative_ack_redelivery_delay_ms=negative_ack_delay_ms,      # 负确认延迟
