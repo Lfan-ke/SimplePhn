@@ -1,0 +1,4 @@
+[submodule "logger"]
+	path = logger
+	url = git@github.com:Lfan-ke/ServerLog.git
+	branch = python
