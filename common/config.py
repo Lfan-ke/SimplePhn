@@ -90,9 +90,8 @@ class ConfigLoader:
                     pass
             self.__port.clear()
 
-    @property
-    def main_topic(self) -> str:
-        return self.config.Pulsar.main_topic + "/" + self.config.Name
+    def main_topic(self, name: str) -> str:
+        return self.config.Pulsar.main_topic + "/" + name
 
     @property
     def dlq_topic(self) -> str:

@@ -25,7 +25,7 @@ async def main():
     sms_service = PulsarService(
         service_name="sms",
         pulsar_url=config.config.Pulsar.Url,
-        main_topic=config.main_topic,
+        main_topic=config.main_topic("sms"),
         dlq_topic=config.dlq_topic,
     )
 
@@ -45,7 +45,7 @@ async def main():
         ServerName="sms",
         ServerDesc="EchoWing 通用短信服务",
         ServerIcon=None,
-        ServerPath=config.config.Pulsar.Main,
+        ServerPath=config.main_topic("sms"),
         ServerData={"fields": {
             **sms_field_description
         }}
