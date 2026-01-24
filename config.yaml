@@ -2,12 +2,12 @@ Name: phn
 Mode: dev
 
 Pulsar:
-  Url: "pulsar://dc-a588.local:6650"
+  Url: "pulsar://localhost:6650"
   Main: "persistent://echo-wing/main"
   Dlq: "persistent://echo-wing/dlq/all"
 
 Consul:
-  Host: "dc-a588.local"
+  Host: "localhost"
   Port: 8500
   Base: "echo_wing/"
   Token: ""
