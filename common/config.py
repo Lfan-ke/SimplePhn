@@ -68,13 +68,17 @@ class AppConfig:
 class ConfigLoader:
     __inst = None
     __port = None
+    __init = False
 
     def __new__(cls, *args, **kwargs):
         if cls.__inst is None:
             cls.__inst = super().__new__(cls)
+            cls.__inst.__init = True
         return cls.__inst
 
     def __init__(self, config_path: str = "config.yaml"):
+        if self.__init:
+            return
         self.config_path = config_path
         self.config = self.__load_config()
         self.__port = None
@@ -146,7 +150,7 @@ class ConfigLoader:
                 if port in tmp_ports:
                     del tmp_ports[port]
             logger.info_sync(f"可用去重后串口: {tmp_ports.keys()}")
-            setattr(ConfigLoader, "__port", tmp_ports)
+            self.__port: dict = tmp_ports
         return self.__port
 
     def get_modem(self):
