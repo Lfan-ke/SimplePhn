@@ -73,15 +73,16 @@ class ConfigLoader:
     def __new__(cls, *args, **kwargs):
         if cls.__inst is None:
             cls.__inst = super().__new__(cls)
-            cls.__inst.__init = True
         return cls.__inst
 
     def __init__(self, config_path: str = "config.yaml"):
-        if self.__init:
+        if hasattr(self, '__initialized') and self.__initialized:
             return
+
         self.config_path = config_path
         self.config = self.__load_config()
         self.__port = None
+        self.__initialized = True
 
     def __del__(self):
         if self.__port is not None:
