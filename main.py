@@ -41,7 +41,7 @@ async def main():
         kv_base_path=config.config.Consul.Base,
     )
 
-    schema = KVServiceMeta(
+    sms_schema = KVServiceMeta(
         ServerName="sms",
         ServerDesc="EchoWing 通用短信服务",
         ServerIcon=None,
@@ -51,7 +51,7 @@ async def main():
         }}
     )
 
-    await consul.register_kv(config.config.Name, schema.to_dict())
+    await consul.register_kv("sms", sms_schema.to_dict())
 
     await logger.info(f"📧 已注册 KV 到 Consul ...")
     await logger.info("🎯 短信服务已启动，配置了自动重试和死信队列")
