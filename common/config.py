@@ -218,6 +218,7 @@ class ModemWrapper:
         config.port_files[port]["lock"] = True
 
     def __del__(self):
+        logger.error_sync(f"🔴 关闭串口: {self.port}")
         config = ConfigLoader()
         config.port_files[self.port]["lock"] = False
         config.port_files[self.port]["last_used"] = time.time()
