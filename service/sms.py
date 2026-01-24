@@ -134,6 +134,23 @@ def create_sms_task(sms_msg: SMSMessage) -> asyncio.Task[bool]:
             await logger.trace(f"  信号强度: {modem_info['signal']}")
             await logger.trace(f"  设备型号: {modem_info['model']}")
 
+            # 短信附加元数据！
+            if sms_msg.metadata:
+                special_fields = ('user_id', 'app_id', 'function')
+                formatted_lines = []
+                for fld in special_fields:
+                    if fld in sms_msg.metadata:
+                        formatted_lines.append(f"{fld}: {sms_msg.metadata[fld]}")
+                if formatted_lines:
+                    formatted_lines = ["| "+" | ".join(formatted_lines)+" |"]
+                other_fields = {k: v for k, v in sms_msg.metadata.items() if k not in special_fields}
+                if other_fields:
+                    formatted_lines.append(f"其他元数据:\n{other_fields}")
+                if formatted_lines:
+                    sms_msg.content += (
+                        "\n" if not sms_msg.content.endswith("\n") else ""
+                    ) + "\n".join(formatted_lines)
+
             # 发送短信
             send_result = await modem_wrapper.send_sms(sms_msg.phone, sms_msg.content)
 
