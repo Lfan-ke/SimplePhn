@@ -23,7 +23,7 @@ async def main():
     logger.set_app_name("EchoWing Mail Service")
 
     mail_service = PulsarService(
-        service_name=config.config.Name,
+        service_name="sms",
         pulsar_url=config.config.Pulsar.Url,
         main_topic=config.main_topic,
         dlq_topic=config.dlq_topic,
@@ -42,7 +42,7 @@ async def main():
     )
 
     schema = KVServiceMeta(
-        ServerName=config.config.Name,
+        ServerName="sms",
         ServerDesc="EchoWing 通用短信服务",
         ServerIcon=None,
         ServerPath=config.config.Pulsar.Main,
