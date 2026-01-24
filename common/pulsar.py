@@ -89,7 +89,7 @@ class PulsarService:
                         topic=self.main_topic,
                         subscription_name=self.subscription_name,
                         consumer_name=self.consumer_name,
-                        consumer_type=pulsar.ConsumerType.Exclusive,
+                        consumer_type=pulsar.ConsumerType.Failover,
                         receiver_queue_size=receiver_queue_size,
                         dead_letter_policy=dead_letter_policy,                       # 应用死信策略
                         negative_ack_redelivery_delay_ms=negative_ack_delay_ms,      # 负确认延迟
