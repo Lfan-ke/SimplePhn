@@ -65,34 +65,28 @@ class AppConfig:
         return data
 
 
+port_files: dict | None = None
+yaml_config: AppConfig | None = None
+
 class ConfigLoader:
-    __inst = None
-    __port = None
-
-    def __new__(cls, *args, **kwargs):
-        if cls.__inst is None:
-            cls.__inst = super().__new__(cls)
-        return cls.__inst
-
     def __init__(self, config_path: str = "config.yaml"):
-        if hasattr(self, '__init') and self.__init:
-            return
-
         self.config_path = config_path
-        self.config = self.__load_config()
-        self.__port = None
-        self.__init = True
+        global yaml_config
+        if yaml_config is None:
+            yaml_config = self.__load_config()
+        self.config = yaml_config
 
     def __del__(self):
-        if self.__port is not None:
-            for _, info in self.__port.items():
+        global port_files
+        if port_files is not None:
+            for _, info in port_files.items():
                 try:
                     modem = info.get('modem')
                     if modem:
                         modem.close()
                 except Exception as _:
                     pass
-            self.__port.clear()
+            port_files = None
 
     def main_topic(self, name: str) -> str:
         return self.config.Pulsar.main_topic + "/" + name
@@ -103,7 +97,8 @@ class ConfigLoader:
 
     @property
     def port_files(self) -> dict:
-        if not self.__port:
+        global port_files
+        if not port_files:
             all_ports = sorted({port for patt in self.config.Port.Patterns for port in glob.glob(patt)})
             logger.info_sync(f"扫描到了串口: {all_ports}")
             def mapper(p):
@@ -150,8 +145,8 @@ class ConfigLoader:
                 if port in tmp_ports:
                     del tmp_ports[port]
             logger.info_sync(f"可用去重后串口: {tmp_ports.keys()}")
-            self.__port: dict = tmp_ports
-        return self.__port
+            port_files = tmp_ports
+        return port_files
 
     def get_modem(self):
         for port in self.port_files.keys():
@@ -218,7 +213,6 @@ class ModemWrapper:
         config.port_files[port]["lock"] = True
 
     def __del__(self):
-        logger.error_sync(f"🔴 关闭串口: {self.port}")
         config = ConfigLoader()
         config.port_files[self.port]["lock"] = False
         config.port_files[self.port]["last_used"] = time.time()
