@@ -16,20 +16,20 @@ async def sms_handler(payload: dict[str, ...]) -> bool:
         task = create_sms_task(mail)
         return await task
     except Exception as e:
-        await logger.error(f"💥 [mail] 处理异常: {e}")
+        await logger.error(f"💥 [sms] 处理异常: {e}")
         return False
 
 async def main():
-    logger.set_app_name("EchoWing Mail Service")
+    logger.set_app_name("EchoWing PHN Service")
 
-    mail_service = PulsarService(
+    sms_service = PulsarService(
         service_name="sms",
         pulsar_url=config.config.Pulsar.Url,
         main_topic=config.main_topic,
         dlq_topic=config.dlq_topic,
     )
 
-    await mail_service.start(
+    await sms_service.start(
         message_handler=sms_handler,
     )
 
@@ -57,16 +57,15 @@ async def main():
     await logger.info("🎯 短信服务已启动，配置了自动重试和死信队列")
 
     try:
-        await asyncio.gather(mail_service.task)
+        await asyncio.gather(sms_service.task)
     except asyncio.CancelledError:
         await logger.info("🛑 服务被终止")
     except Exception as e:
         await logger.error(f"💥 主程序异常: {e}")
     finally:
-        await mail_service.stop()
+        await sms_service.stop()
         await consul.deregister_kv(config.config.Name)
         await logger.info(f"🚮 已注销 KV 从 Consul ...")
 
 if __name__ == "__main__":
     asyncio.run(main())
-
