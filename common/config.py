@@ -130,6 +130,8 @@ class ConfigLoader:
             for port, info in tmp_ports.items():
                 imsi = info['imsi']
                 signal = info['signal']
+                if imsi == "unknown":
+                    continue
                 if imsi not in imsi_map:
                     imsi_map[imsi] = []
                 imsi_map[imsi].append((port, signal, info))
