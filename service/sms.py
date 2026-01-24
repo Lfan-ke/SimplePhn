@@ -193,13 +193,13 @@ def create_sms_task(sms_msg: SMSMessage) -> asyncio.Task[bool]:
             await logger.warn(f"⏹️ 短信发送任务取消 {message_id}: {sms_msg.phone}")
 
         except Exception as e:
+            import traceback
             result["success"] = False
             result["message"] = f"短信发送异常: {str(e)}"
             result["error"] = "UNKNOWN_ERROR"
-            result["error_detail"] = {"exception": str(e), "type": type(e).__name__}
+            result["error_detail"] = {"exception": str(e), "type": type(e).__name__, "traceback": traceback.format_exception(type(e), e, e.__traceback__)}
             result["elapsed_time"] = time.time() - start_time
-            import traceback
-            await logger.error(f"💥 短信发送异常 {message_id}: {traceback.format_exception(type(e), e, e.__traceback__)}")
+            await logger.error(f"💥 短信发送异常 {message_id}: {result['error_detail']}")
 
         finally:
             if 'modem_wrapper' in locals():
