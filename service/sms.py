@@ -8,6 +8,22 @@ from datetime import datetime
 from common.config import ModemWrapper
 from logger import logger
 
+import traceback
+import threading
+
+
+def setup_global_exception_handler():
+    """设置全局线程异常处理器"""
+    def thread_exception_handler(args):
+        if (hasattr(args.exc_value, '__class__') and
+            args.exc_value.__class__.__name__ == 'CommandError' and
+            'Failed to parse PDU-mode SMS message +CMGR response:' in str(args.exc_value)):
+            return  # 忽略这个异常
+    threading.excepthook = thread_exception_handler
+
+
+setup_global_exception_handler()
+
 
 @dataclass
 class SMSMessage:
