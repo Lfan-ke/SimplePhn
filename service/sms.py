@@ -23,7 +23,7 @@ class SMSMessage:
             data['phone'] = phone
         else:
             data['phone'] = f"+86{phone}"
-        return cls(**data)
+        return cls(**{k: data[k] for k in data if k in cls.__annotations__})
 
 
 sms_field_description = {

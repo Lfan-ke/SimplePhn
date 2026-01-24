@@ -41,8 +41,8 @@ class PulsarService:
             self,
             message_handler: MessageHandler,
             max_redelivery_count: int = 3,
-            negative_ack_delay_ms: int = 90000,  # 负确认重试延迟
-            ack_timeout_ms: int = 300000,        # ACK超时时间
+            negative_ack_delay_ms: int = 90000,   # 负确认重试延迟
+            ack_timeout_ms: int = 1200000,        # ACK超时时间
             receiver_queue_size: int = 1000
     ) -> asyncio.Task:
         """
