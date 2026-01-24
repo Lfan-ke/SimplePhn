@@ -76,18 +76,6 @@ class ConfigLoader:
             yaml_config = self.__load_config()
         self.config = yaml_config
 
-    def __del__(self):
-        global port_files
-        if port_files is not None:
-            for _, info in port_files.items():
-                try:
-                    modem = info.get('modem')
-                    if modem:
-                        modem.close()
-                except Exception as _:
-                    pass
-            port_files = None
-
     def main_topic(self, name: str) -> str:
         return self.config.Pulsar.main_topic + "/" + name
 
