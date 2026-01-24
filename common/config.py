@@ -210,7 +210,7 @@ class ModemWrapper:
         return ConfigLoader().get_modem()
 
     def get_info(self):
-        return ConfigLoader().port_files[self.port]
+        return ConfigLoader().port_files[self.port] | {"port": self.port}
 
     def send_sms_sync(self, phone: str, message: str) -> dict:
         """
