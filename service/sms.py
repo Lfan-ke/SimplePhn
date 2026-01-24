@@ -67,11 +67,11 @@ async def _wait_for_modem(max_attempts: int = 5) -> Optional[ModemWrapper]:
 
         if attempt < len(wait_times):
             wait_time = wait_times[attempt]
-            logger.warning_sync(f"📱 没有可用的调制解调器，第{attempt + 1}次等待 {wait_time}秒...")
+            logger.warn_sync(f"📱 没有可用的调制解调器，第{attempt + 1}次等待 {wait_time}秒...")
             await asyncio.sleep(wait_time)
         else:
             default_wait = 60
-            logger.warning_sync(f"📱 等待超时，使用默认等待时间 {default_wait}秒...")
+            logger.warn_sync(f"📱 等待超时，使用默认等待时间 {default_wait}秒...")
             await asyncio.sleep(default_wait)
 
     return None
@@ -190,7 +190,7 @@ def create_sms_task(sms_msg: SMSMessage) -> asyncio.Task[bool]:
             result["error"] = "TASK_CANCELLED"
             result["elapsed_time"] = time.time() - start_time
 
-            await logger.warning(f"⏹️ 短信发送任务取消 {message_id}: {sms_msg.phone}")
+            await logger.warn(f"⏹️ 短信发送任务取消 {message_id}: {sms_msg.phone}")
 
         except Exception as e:
             # 未知异常

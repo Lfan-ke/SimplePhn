@@ -153,7 +153,7 @@ class PulsarService:
             else:
                 # 处理失败，负确认 - Pulsar会自动重试
                 await self._negative_ack(msg)
-                await logger.warning(f"🔄 [{self.service_name}] 处理失败，触发自动重试: {msg_id}")
+                await logger.warn(f"🔄 [{self.service_name}] 处理失败，触发自动重试: {msg_id}")
 
         except Exception as e:
             await logger.error(f"⚠️  [{self.service_name}] 消息处理异常: {e}")

@@ -328,7 +328,7 @@ class ModemWrapper:
 
             # 如果错误太多，记录警告
             if port_info.get('error_count', 0) >= 5:
-                logger.warning_sync(f"⚠️  {self.port} 错误计数达到 {port_info['error_count']}")
+                logger.warn_sync(f"⚠️  {self.port} 错误计数达到 {port_info['error_count']}")
 
         return result
 
@@ -358,7 +358,7 @@ class ModemWrapper:
 
         except asyncio.CancelledError:
             # 如果任务被取消
-            logger.warning_sync(f"⏹️  {self.port} -> {phone[:8]}... 发送任务被取消")
+            logger.warn_sync(f"⏹️  {self.port} -> {phone[:8]}... 发送任务被取消")
             return {
                 'success': False,
                 'phone': phone,
