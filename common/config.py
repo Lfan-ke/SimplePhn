@@ -68,7 +68,6 @@ class AppConfig:
 class ConfigLoader:
     __inst = None
     __port = None
-    __init = False
 
     def __new__(cls, *args, **kwargs):
         if cls.__inst is None:
