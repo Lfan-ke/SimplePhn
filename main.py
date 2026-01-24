@@ -55,6 +55,11 @@ async def main():
 
     await logger.info(f"📧 已注册 KV 到 Consul ...")
     await logger.info("🎯 短信服务已启动，配置了自动重试和死信队列")
+    await logger.info(f"✉️ 开始扫描串口 ...")
+
+    port_files = config.port_files
+
+    await logger.info(f"ℹ️ 发现 {len(port_files)} 个串口： {port_files}")
 
     try:
         await asyncio.gather(sms_service.task)
