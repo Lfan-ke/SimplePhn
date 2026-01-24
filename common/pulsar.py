@@ -138,7 +138,7 @@ class PulsarService:
             # 检查是否已超过最大重试次数
             if redelivery_count >= self.max_redelivery_count:
                 await logger.warn(f"💀 [{self.service_name}] 已达到最大重试次数({self.max_redelivery_count})，进入死信队列: {msg_id}")
-                await self._ack(msg)
+                await self._negative_ack(msg)
                 return
 
             # 解析JSON
