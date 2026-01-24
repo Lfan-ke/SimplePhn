@@ -129,11 +129,11 @@ class PulsarService:
         msg_id = msg.message_id()
 
         try:
-            await logger.trace(f"📨 [{self.service_name}] 收到消息: {msg_id}")
+            await logger.info(f"📨 [{self.service_name}] 收到消息: {msg_id}")
 
             redelivery_count = msg.redelivery_count()
             if redelivery_count > 0:
-                await logger.trace(f"🔄 [{self.service_name}] 第{redelivery_count}次重试")
+                await logger.warn(f"🔄 [{self.service_name}] 第{redelivery_count}次重试")
 
             # 检查是否已超过最大重试次数
             if redelivery_count >= self.max_redelivery_count:
@@ -158,7 +158,7 @@ class PulsarService:
 
             if success:
                 await self._ack(msg)
-                await logger.trace(f"✅ [{self.service_name}] 处理成功: {msg_id}")
+                await logger.info(f"✅ [{self.service_name}] 处理成功: {msg_id}")
             else:
                 # 处理失败，负确认 - Pulsar会自动重试
                 await self._negative_ack(msg)

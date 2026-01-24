@@ -105,10 +105,10 @@ def create_sms_task(sms_msg: SMSMessage) -> asyncio.Task[bool]:
         }
 
         try:
-            await logger.trace(f"开始发送短信: {message_id}")
-            await logger.trace(f"收件人: {sms_msg.phone}")
-            await logger.trace(f"内容长度: {len(sms_msg.content)} 字符")
-            await logger.trace(f"短信预览: {sms_msg.content[:25]} ... {sms_msg.content[-25:]}")
+            await logger.info(f"开始发送短信: {message_id}")
+            await logger.info(f"收件人: {sms_msg.phone}")
+            await logger.info(f"内容长度: {len(sms_msg.content)} 字符")
+            await logger.info(f"短信预览: {sms_msg.content[:15]} ... {sms_msg.content[-15:]}")
 
             result["attempts"] += 1
             modem_wrapper = await _wait_for_modem()
@@ -165,8 +165,8 @@ def create_sms_task(sms_msg: SMSMessage) -> asyncio.Task[bool]:
             if send_result.get("success"):
                 result["success"] = True
                 result["message"] = "短信发送成功"
-                await logger.trace(f"✅ 短信发送成功 {message_id}: {sms_msg.phone}")
-                await logger.trace(f"  耗时: {result['elapsed_time']:.2f}秒")
+                await logger.info(f"✅ 短信发送成功 {message_id}: {sms_msg.phone}")
+                await logger.info(f"  耗时: {result['elapsed_time']:.2f}秒")
             else:
                 result["success"] = False
                 result["message"] = send_result.get("error", "短信发送失败")
