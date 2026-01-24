@@ -113,7 +113,7 @@ class ConfigLoader:
             tmp_ports = {
                 port: {
                     'modem': modem,
-                    'imsi': modem.imsi if hasattr(modem, 'imsi') else "unknown",
+                    'imsi': modem.imsi,
                     'imei': modem.imei if hasattr(modem, 'imei') else "unknown",
                     'signal': modem.signalStrength if hasattr(modem, 'signalStrength') else -1,
                     'model': modem.model if hasattr(modem, 'model') else "Unknown",
@@ -123,15 +123,13 @@ class ConfigLoader:
                     'error_count': 0,
                     'last_used': 0,
                     'created_at': time.time()
-                } for port, modem in map(mapper, all_ports) if port
+                } for port, modem in map(mapper, all_ports) if port and hasattr(modem, 'imsi')
             }
             # 按 imsi 去重
             imsi_map: dict = {}
             for port, info in tmp_ports.items():
                 imsi = info['imsi']
                 signal = info['signal']
-                if imsi == "unknown":
-                    continue
                 if imsi not in imsi_map:
                     imsi_map[imsi] = []
                 imsi_map[imsi].append((port, signal, info))

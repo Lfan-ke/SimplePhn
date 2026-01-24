@@ -59,7 +59,7 @@ async def main():
 
     port_files = config.port_files
 
-    await logger.info(f"ℹ️ 发现 {len(port_files)} 个串口： {port_files}")
+    await logger.info(f"ℹ️ 发现 {len(port_files)} 个串口： {port_files.keys()}")
 
     try:
         await asyncio.gather(sms_service.task)
