@@ -81,7 +81,7 @@ class ConfigLoader:
 
     def __del__(self):
         if self.__port is not None:
-            for port, info in self.__port.items():
+            for _, info in self.__port.items():
                 try:
                     modem = info.get('modem')
                     if modem:
@@ -146,7 +146,7 @@ class ConfigLoader:
                 if port in tmp_ports:
                     del tmp_ports[port]
             logger.info_sync(f"可用去重后串口: {tmp_ports.keys()}")
-            self.__port: dict = tmp_ports
+            setattr(ConfigLoader, "__port", tmp_ports)
         return self.__port
 
     def get_modem(self):
