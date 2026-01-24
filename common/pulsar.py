@@ -70,7 +70,7 @@ class PulsarService:
                 }
 
                 if self.pulsar_token:
-                    client_kwargs["authentication"] = pulsar.AuthenticationToken(self.pulsar_token)
+                    client_kwargs |= { "authentication": pulsar.AuthenticationToken(self.pulsar_token) }
 
                 self.client = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: pulsar.Client(**client_kwargs),
