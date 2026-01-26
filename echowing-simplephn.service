@@ -1,0 +1,27 @@
+[Unit]
+Description=EchoWing SimplePhn Service (Serial Port)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/heke1228/application/SimplePhn
+ExecStart=/usr/bin/uv run main.py
+Restart=on-failure
+RestartSec=5
+
+PermissionsStartOnly=true
+ReadWritePaths=/home/heke1228/application/SimplePhn
+
+DeviceAllow=/dev/ttyUSB* rw
+
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/sbin
+Environment=PYTHONUNBUFFERED=1
+
+NoNewPrivileges=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
