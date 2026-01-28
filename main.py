@@ -24,10 +24,6 @@ async def main():
 
     await logger.info(f"⭐ 初始化 USB ...")
 
-    config.init_port()
-
-    await asyncio.sleep(10)
-
     sms_service = PulsarService(
         service_name="sms",
         pulsar_url=config.config.Pulsar.Url,
