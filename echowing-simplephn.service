@@ -34,7 +34,6 @@ ReadWritePaths=/
 ReadOnlyPaths=/
 
 ExecStartPre=/bin/sh -c 'echo "当前用户: $(whoami)"'
-ExecStartPre=/bin/sh -c 'echo "设备权限: $(ls -la /dev/ttyUSB* 2>/dev/null || echo "无设备")"'
 
 ExecStart=/usr/bin/uv run main.py
 
