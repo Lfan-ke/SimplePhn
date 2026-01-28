@@ -1,5 +1,5 @@
 [Unit]
-Description=EchoWing SimplePhn Service (Serial Port)
+Description=EchoWing SimplePhn Service
 After=network.target
 
 [Service]
