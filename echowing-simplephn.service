@@ -1,28 +1,55 @@
 [Unit]
 Description=EchoWing SimplePhn Service (Serial Port)
 After=network.target
-Wants=network.target
 
 [Service]
 Type=simple
-User=heke1228
-Group=heke1228
+User=root
+Group=root
 WorkingDirectory=/home/heke1228/application/SimplePhn
+
+NoNewPrivileges=no
+PrivateTmp=no
+PrivateDevices=no
+PrivateUsers=no
+ProtectHome=no
+ProtectSystem=no
+ProtectKernelTunables=no
+ProtectKernelModules=no
+ProtectControlGroups=no
+RestrictAddressFamilies=~
+RestrictNamespaces=no
+RestrictRealtime=no
+RestrictSUIDSGID=no
+LockPersonality=no
+MemoryDenyWriteExecute=no
+
+DeviceAllow=*
+DevicePolicy=auto
+
+CapabilityBoundingSet=~
+AmbientCapabilities=~
+
+ReadWritePaths=/
+ReadOnlyPaths=/
+
+ExecStartPre=/bin/sh -c 'echo "当前用户: $(whoami)"'
+ExecStartPre=/bin/sh -c 'echo "设备权限: $(ls -la /dev/ttyUSB* 2>/dev/null || echo "无设备")"'
+
 ExecStart=/usr/bin/uv run main.py
+
 Restart=on-failure
 RestartSec=5
 
-PermissionsStartOnly=true
-ReadWritePaths=/home/heke1228/application/SimplePhn
-
-DeviceAllow=/dev/ttyUSB* rw
-
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:/sbin
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/root
 
-NoNewPrivileges=false
-PrivateTmp=true
-PrivateDevices=false
+LimitNOFILE=65536
+LimitNPROC=65536
+
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
