@@ -3,37 +3,37 @@ Description=EchoWing SimplePhn Service (Serial Port)
 After=network.target
 
 [Service]
-Type=simple
+Type=exec
 User=root
 Group=root
 WorkingDirectory=/home/heke1228/application/SimplePhn
 
-NoNewPrivileges=no
-PrivateTmp=no
-PrivateDevices=no
-PrivateUsers=no
-ProtectHome=no
-ProtectSystem=no
-ProtectKernelTunables=no
-ProtectKernelModules=no
-ProtectControlGroups=no
-RestrictAddressFamilies=~
-RestrictNamespaces=no
-RestrictRealtime=no
-RestrictSUIDSGID=no
-LockPersonality=no
-MemoryDenyWriteExecute=no
+NoNewPrivileges=false
+PrivateTmp=false
+PrivateDevices=false
+PrivateUsers=false
+ProtectHome=false
+ProtectSystem=false
+ProtectKernelTunables=false
+ProtectKernelModules=false
+ProtectControlGroups=false
+RestrictAddressFamilies=
+RestrictNamespaces=false
+RestrictRealtime=false
+RestrictSUIDSGID=false
+LockPersonality=false
+MemoryDenyWriteExecute=false
 
-DeviceAllow=*
+DeviceAllow=char-* rw
+DeviceAllow=block-* rw
 DevicePolicy=auto
 
-CapabilityBoundingSet=~
-AmbientCapabilities=~
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_SYS_RAWIO CAP_NET_RAW CAP_SYSLOG
+AmbientCapabilities=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_SYS_RAWIO CAP_NET_RAW CAP_SYSLOG
 
-ReadWritePaths=/
-ReadOnlyPaths=/
-
-ExecStartPre=/bin/sh -c 'echo "当前用户: $(whoami)"'
+ReadWritePaths=/ /sys /proc /dev
+BindPaths=/root/.cache:/root/.cache
+BindReadOnlyPaths=
 
 ExecStart=/usr/bin/uv run main.py
 
@@ -43,12 +43,10 @@ RestartSec=5
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/root
+Environment=XDG_CACHE_HOME=/root/.cache
 
 LimitNOFILE=65536
 LimitNPROC=65536
-
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
