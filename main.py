@@ -22,6 +22,12 @@ async def sms_handler(payload: dict[str, ...]) -> bool:
 async def main():
     logger.set_app_name("EchoWing PHN Service")
 
+    await logger.info(f"⭐ 初始化 USB ...")
+
+    config.init_port()
+
+    await asyncio.sleep(10)
+
     sms_service = PulsarService(
         service_name="sms",
         pulsar_url=config.config.Pulsar.Url,
@@ -55,10 +61,6 @@ async def main():
 
     await logger.info(f"📧 已注册 KV 到 Consul ...")
     await logger.info("🎯 短信服务已启动，配置了自动重试和死信队列")
-
-    await logger.info(f"⭐ 初始化 USB ...")
-
-    config.init_port()
 
     await logger.info(f"✉️ 开始扫描串口 ...")
 
