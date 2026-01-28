@@ -44,6 +44,8 @@ class ModemConfig:
     BaudRate: int = 115200
     TimeOut: int = 10.0
     Patterns: list[str] = field(default_factory=lambda: ["COM*"])
+    # 默认重置的USB VID/PID
+    UsbVPid: list[str] = field(default_factory=lambda: ["0000:0000"])
 
     def to_dict(self) -> dict[str, ...]:
         return asdict(self)
@@ -181,7 +183,8 @@ class ConfigLoader:
         port_config = ModemConfig(
             BaudRate=port_data.get("BaudRate", 115200),
             TimeOut=port_data.get("TimeOut", 10),
-            Patterns=port_data.get("Patterns", ["COM*"])
+            Patterns=port_data.get("Patterns", ["COM*"]),
+            UsbVPid=port_data.get("UsbVPid", ["0000:0000"]),
         )
 
         configs = AppConfig(
@@ -193,6 +196,12 @@ class ConfigLoader:
         )
 
         return configs
+
+    def init_port(self):
+        import os
+        for usb in self.config.Port.UsbVPid:
+            os.system(f"usbreset {usb}")
+
 
 class ModemWrapper:
     def __init__(self, port):

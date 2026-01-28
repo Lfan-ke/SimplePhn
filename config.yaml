@@ -16,5 +16,7 @@ Consul:
 Modem:
   BaudRate: 115200
   TimeOut: 10.0
+  UsbVPid:
+    - "2c7c:0125"
   Patterns:
     - "/dev/ttyUSB*"
