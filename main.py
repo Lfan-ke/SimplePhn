@@ -26,7 +26,7 @@ async def main():
 
     config.init_port()
 
-    await asyncio.sleep(15)
+    await asyncio.sleep(10)
 
     sms_service = PulsarService(
         service_name="sms",

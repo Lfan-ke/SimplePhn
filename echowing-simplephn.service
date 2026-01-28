@@ -8,7 +8,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/home/heke1228/application/SimplePhn
-ExecStart=/usr/bin/sudo /usr/bin/uv run main.py
+ExecStart=/usr/bin/uv run main.py
 Restart=on-failure
 RestartSec=5
 
@@ -17,11 +17,17 @@ ReadWritePaths=/home/heke1228/application/SimplePhn
 
 DeviceAllow=/dev/ttyUSB* rw
 
+ReadWritePaths=/home/heke1228/application/SimplePhn /dev /sys/bus/usb /tmp /run
+
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:/sbin
 Environment=PYTHONUNBUFFERED=1
 
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_NET_BIND_SERVICE CAP_SYS_RAWIO
+AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_OVERRIDE
+
 NoNewPrivileges=false
 PrivateTmp=true
+PrivateDevices=false
 
 [Install]
 WantedBy=multi-user.target
