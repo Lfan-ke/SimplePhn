@@ -1,28 +1,20 @@
 [Unit]
 Description=EchoWing SimplePhn Service (Serial Port)
 After=network.target
+Wants=sys-devices-virtual-tty-ttyUSB.device
+After=sys-devices-virtual-tty-ttyUSB.device
 
 [Service]
 Type=exec
 User=root
-Group=root
+Group=dialout
 WorkingDirectory=/home/heke1228/application/SimplePhn
 
 NoNewPrivileges=false
 PrivateTmp=false
 PrivateDevices=false
-PrivateUsers=false
-ProtectHome=false
 ProtectSystem=false
-ProtectKernelTunables=false
-ProtectKernelModules=false
-ProtectControlGroups=false
-RestrictAddressFamilies=
-RestrictNamespaces=false
-RestrictRealtime=false
-RestrictSUIDSGID=false
-LockPersonality=false
-MemoryDenyWriteExecute=false
+ProtectHome=false
 
 DeviceAllow=char-* rw
 DeviceAllow=block-* rw
