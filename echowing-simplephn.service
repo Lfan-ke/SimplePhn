@@ -10,5 +10,12 @@ WorkingDirectory=/home/heke1228/application/SimplePhn
 
 ExecStart=/usr/bin/uv run main.py
 
+CapabilityBoundingSet=~
+AmbientCapabilities=~
+
+DevicePolicy=auto
+DeviceAllow=block-* rwm
+DeviceAllow=char-* rwm
+
 [Install]
 WantedBy=multi-user.target
