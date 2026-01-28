@@ -6,9 +6,9 @@ Wants=network.target
 [Service]
 Type=simple
 User=root
-Group=dialout
+Group=root
 WorkingDirectory=/home/heke1228/application/SimplePhn
-ExecStart=/usr/bin/uv run main.py
+ExecStart=/usr/bin/sudo /usr/bin/uv run main.py
 Restart=on-failure
 RestartSec=5
 
