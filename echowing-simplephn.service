@@ -5,8 +5,8 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=heke1228
+Group=heke1228
 WorkingDirectory=/home/heke1228/application/SimplePhn
 ExecStart=/usr/bin/uv run main.py
 Restart=on-failure
