@@ -200,6 +200,7 @@ class ConfigLoader:
         import os
         for usb in self.config.Port.UsbVPid:
             os.system(f"usbreset {usb}")
+        port_files.clear()
 
 
 class ModemWrapper:
