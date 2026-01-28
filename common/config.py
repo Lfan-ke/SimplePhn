@@ -199,7 +199,7 @@ class ConfigLoader:
     def init_port(self):
         import os
         for usb in self.config.Port.UsbVPid:
-            os.system(f"sudo usbreset {usb}")
+            os.system(f"usbreset {usb}")
         global port_files
         if port_files: port_files.clear()
 
