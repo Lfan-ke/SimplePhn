@@ -1,8 +1,6 @@
 [Unit]
 Description=EchoWing SimplePhn Service (Serial Port)
 After=network.target
-Wants=sys-devices-virtual-tty-ttyUSB.device
-After=sys-devices-virtual-tty-ttyUSB.device
 
 [Service]
 Type=exec
@@ -10,35 +8,7 @@ User=root
 Group=dialout
 WorkingDirectory=/home/heke1228/application/SimplePhn
 
-NoNewPrivileges=false
-PrivateTmp=false
-PrivateDevices=false
-ProtectSystem=false
-ProtectHome=false
-
-DeviceAllow=char-* rw
-DeviceAllow=block-* rw
-DevicePolicy=auto
-
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_SYS_RAWIO CAP_NET_RAW CAP_SYSLOG
-AmbientCapabilities=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_SYS_RAWIO CAP_NET_RAW CAP_SYSLOG
-
-ReadWritePaths=/ /sys /proc /dev
-BindPaths=/root/.cache:/root/.cache
-BindReadOnlyPaths=
-
 ExecStart=/usr/bin/uv run main.py
-
-Restart=on-failure
-RestartSec=5
-
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=PYTHONUNBUFFERED=1
-Environment=HOME=/root
-Environment=XDG_CACHE_HOME=/root/.cache
-
-LimitNOFILE=65536
-LimitNPROC=65536
 
 [Install]
 WantedBy=multi-user.target
