@@ -8,7 +8,6 @@ from datetime import datetime
 from common.config import ModemWrapper
 from logger import logger
 
-import traceback
 import threading
 
 

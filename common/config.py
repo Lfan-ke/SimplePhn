@@ -1,6 +1,5 @@
 import yaml, glob
 from dataclasses import dataclass, field, asdict
-import gsmmodem
 from gsmmodem.modem import GsmModem
 from logger import logger
 import time
