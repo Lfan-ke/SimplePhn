@@ -43,24 +43,30 @@ class SMSMessage:
 
 
 sms_field_description = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "SMS Message Schema",
+  "description": "短信发送消息格式",
+  "properties": {
     "phone": {
-        "type": "str",
-        "description": "手机号码",
-        "required": True,
-        "pattern": r"^(\+\d{10,15}|1[3-9]\d{9})$",
+      "type": "string",
+      "description": "手机号码",
+      "pattern": "^(\\+\\d{10,15}|1[3-9]\\d{9})$"
     },
     "content": {
-        "type": "str",
-        "description": "短信内容",
-        "required": True,
-        "minLength": 1,
+      "type": "string",
+      "description": "短信内容",
+      "minLength": 1
     },
     "metadata": {
-        "type": "dict",
-        "description": "可选元数据",
-        "required": False,
-        "default": {},
+      "type": "object",
+      "description": "可选元数据",
+      "default": {},
+      "additionalProperties": True
     }
+  },
+  "required": ["phone", "content"],
+  "additionalProperties": True
 }
 
 async def _wait_for_modem(max_attempts: int = 5) -> Optional[ModemWrapper]:
