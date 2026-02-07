@@ -8,6 +8,7 @@ from service import (
 )
 
 config = ConfigLoader()
+logger.set_app_name(f"<[EW Phone]>")
 
 async def sms_handler(payload: dict[str, ...]) -> bool:
     """邮件服务处理器"""
